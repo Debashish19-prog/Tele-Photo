@@ -1,0 +1,281 @@
+@import "tailwindcss";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+    --lq-radius: 16px;
+    --color-lq-scrim: var(--lq-scrim);
+    --color-lq-danger-text: var(--lq-danger-text);
+    --color-lq-danger: var(--lq-danger);
+    --color-lq-accent: var(--lq-accent);
+    --color-lq-control-rim: var(--lq-control-rim);
+    --color-lq-control: var(--lq-control);
+    --color-lq-highlight: var(--lq-highlight);
+    --lq-shadow: var(--lq-shadow);
+    --color-lq-rim-lo: var(--lq-rim-lo);
+    --color-lq-rim-hi: var(--lq-rim-hi);
+    --color-lq-tint-deep: var(--lq-tint-deep);
+    --color-lq-tint: var(--lq-tint);
+    --color-lq-text-dim: var(--lq-text-dim);
+    --color-lq-text: var(--lq-text);
+}
+
+:root {
+    --lq-text: rgba(28, 28, 40, 0.95);
+    --lq-text-dim: rgba(28, 28, 40, 0.55);
+    --lq-tint: rgba(255, 255, 255, 0.48);
+    --lq-tint-deep: rgba(255, 255, 255, 0.14);
+    --lq-rim-hi: rgba(255, 255, 255, 0.85);
+    --lq-rim-lo: rgba(255, 255, 255, 0.28);
+    --lq-shadow: 0 24px 60px rgba(10, 15, 40, 0.35), 0 4px 14px rgba(10, 15, 40, 0.18);
+    --lq-highlight: rgba(255, 255, 255, 0.5);
+    --lq-control: rgba(255, 255, 255, 0.72);
+    --lq-control-rim: rgba(28, 28, 40, 0.16);
+    --lq-accent: #2f6bff;
+    --lq-danger: #e5484d;
+    --lq-danger-text: #c1272c;
+    --lq-scrim: rgba(12, 14, 28, 0.32);
+}
+
+.dark {
+    --lq-text: rgba(245, 246, 255, 0.96);
+    --lq-text-dim: rgba(245, 246, 255, 0.55);
+    --lq-tint: rgba(30, 32, 46, 0.62);
+    --lq-tint-deep: rgba(18, 20, 32, 0.4);
+    --lq-rim-hi: rgba(255, 255, 255, 0.5);
+    --lq-rim-lo: rgba(255, 255, 255, 0.12);
+    --lq-shadow: 0 24px 60px rgba(0, 0, 5, 0.55), 0 4px 14px rgba(0, 0, 5, 0.35);
+    --lq-highlight: rgba(255, 255, 255, 0.18);
+    --lq-control: rgba(126, 128, 146, 0.3);
+    --lq-control-rim: rgba(255, 255, 255, 0.22);
+    --lq-accent: #3f7cff;
+    --lq-danger: #ff7076;
+    --lq-danger-text: #ff7076;
+    --lq-scrim: rgba(0, 0, 6, 0.48);
+}
+
+/* ---- Tele-Photo ---------------------------------------------------------------------------- */
+
+@import "@fontsource-variable/figtree";
+
+:root {
+  --app-bg: #f4f5f9;
+  --app-surface: #ffffff;
+  --app-tile: #e4e6ed;
+  --app-line: rgba(28, 28, 40, 0.1);
+  --app-selected: #dbe6ff;
+  --sidebar-w: 0px;
+  --top-h: 76px;
+  color-scheme: light;
+}
+
+.dark {
+  --app-bg: #0d0e12;
+  --app-surface: #16171d;
+  --app-tile: #1d1f27;
+  --app-line: rgba(255, 255, 255, 0.1);
+  --app-selected: #1b2748;
+  color-scheme: dark;
+}
+
+@media (min-width: 720px) {
+  :root { --sidebar-w: 88px; }
+}
+
+@media (min-width: 1180px) {
+  :root { --sidebar-w: 264px; }
+}
+
+html {
+  /*
+   * The timeline scrubber does this job, as it does in other photo apps. A classic scrollbar would
+   * also leave a bright strip beside the viewer and dialogs, and shift the page when they open.
+   */
+  scrollbar-width: none;
+}
+
+body {
+  margin: 0;
+  min-height: 100dvh;
+  background: var(--app-bg);
+  color: var(--lq-text);
+  font-family: 'Figtree Variable', ui-sans-serif, system-ui, sans-serif;
+  font-size: 14px;
+  -webkit-font-smoothing: antialiased;
+  overflow-wrap: anywhere;
+}
+
+/*
+ * Glass bends what is behind it, and a flat page gives it nothing to bend. This colour sits behind
+ * the sidebar for when there are no photos underneath, and fades out before it reaches the grid.
+ */
+.ambient {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  background: var(--app-bg);
+}
+
+.ambient::before {
+  content: '';
+  position: absolute;
+  inset: -10% auto -10% 0;
+  width: calc(var(--sidebar-w) + 70px);
+  background:
+    radial-gradient(150px 230px at 30% 16%, rgba(55, 174, 226, 0.55), transparent 72%),
+    radial-gradient(170px 270px at 62% 52%, rgba(124, 92, 255, 0.36), transparent 72%),
+    radial-gradient(170px 250px at 26% 84%, rgba(255, 138, 92, 0.42), transparent 72%);
+  -webkit-mask-image: linear-gradient(to right, black calc(100% - 70px), transparent);
+  mask-image: linear-gradient(to right, black calc(100% - 70px), transparent);
+}
+
+.dark .ambient::before {
+  opacity: 0.62;
+}
+
+/* Phones have no sidebar, so there is nothing for it to sit behind. */
+@media (max-width: 719px) {
+  .ambient::before { display: none; }
+}
+
+/* The library's default corner is a squircle. A capsule or a circle should be exactly that. */
+.lq-round,
+.lq-round * {
+  corner-shape: round !important;
+}
+
+.selection-bar .liqui-glass__content {
+  width: 100%;
+}
+
+/*
+ * The stock tab bar reserves a slot for its optional search button with a clip-path, even with no
+ * search button present, which crops the last tab. This app has no such button.
+ */
+.mobile-tabs .liqui-glass {
+  flex: 1;
+  clip-path: none !important;
+}
+
+/* For a surface people read rather than look through, such as a menu over a dark photo. */
+.lq-solid {
+  --lq-tint: color-mix(in srgb, var(--app-surface) 88%, transparent);
+}
+
+body:has(.selection-bar) header {
+  visibility: hidden;
+}
+
+/* The sign-in wallpaper: an abstract wall of photos, generated, with no image files to ship. */
+.mosaic {
+  position: fixed;
+  inset: -4%;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(190px, 1fr));
+  grid-auto-rows: 170px;
+  gap: 8px;
+  transform: rotate(-4deg) scale(1.1);
+  animation: mosaic-drift 90s linear infinite alternate;
+}
+
+.mosaic > i {
+  display: block;
+  border-radius: 12px;
+}
+
+@keyframes mosaic-drift {
+  to { transform: rotate(-4deg) scale(1.1) translateY(-90px); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .mosaic { animation: none; }
+}
+
+/* ---- The grid -------------------------------------------------------------------------------- */
+
+.tile {
+  position: absolute;
+  overflow: hidden;
+  background: var(--app-tile);
+  contain: strict;
+}
+
+.tile img {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  transition: transform 140ms cubic-bezier(0.2, 0.8, 0.3, 1), border-radius 140ms;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.tile[data-selected='true'] {
+  background: var(--app-selected);
+}
+
+.tile[data-selected='true'] img {
+  transform: scale(0.86);
+  border-radius: 10px;
+}
+
+.tile:has(:focus-visible) {
+  outline: 2px solid var(--lq-accent);
+  outline-offset: 1px;
+}
+
+.tile-scrim {
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 64px;
+  background: linear-gradient(to bottom, rgba(0, 0, 0, 0.42), transparent);
+  opacity: 0;
+  transition: opacity 120ms;
+  pointer-events: none;
+}
+
+.tile:hover .tile-scrim,
+.tile:has(:focus-visible) .tile-scrim {
+  opacity: 1;
+}
+
+.tile-check {
+  position: absolute;
+  top: 6px;
+  left: 6px;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  opacity: 0;
+  transition: opacity 120ms, transform 120ms;
+}
+
+.tile:hover .tile-check,
+.tile:has(:focus-visible) .tile-check,
+[data-selecting='true'] .tile-check,
+.tile[data-selected='true'] .tile-check {
+  opacity: 1;
+}
+
+/* There is no hover on a touchscreen, so there selection starts with a long press. */
+@media (hover: none) {
+  .tile-scrim { display: none; }
+}
+
+@keyframes shimmer {
+  0%, 100% { opacity: 0.55; }
+  50% { opacity: 1; }
+}
+
+.shimmer {
+  animation: shimmer 1.6s ease-in-out infinite;
+}
+
+:where(a, button, [tabindex]):focus-visible {
+  outline: 2px solid var(--lq-accent);
+  outline-offset: 2px;
+}
