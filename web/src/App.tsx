@@ -1,5 +1,6 @@
 import { useQuery } from '@tanstack/react-query';
 import { useEffect, useRef, useState } from 'react';
+import { Analytics } from '@vercel/analytics/react';
 import { api, stopEngine } from '@/api';
 import { LoginScreen } from '@/components/LoginScreen';
 import { Shell } from '@/components/Shell';
@@ -60,7 +61,12 @@ export function App() {
 
   if (tab === 'waiting') return <div className="ambient" />;
   if (tab === 'elsewhere' || tab === 'moved') return <OtherTabNotice moved={tab === 'moved'} />;
-  return <ActiveApp />;
+  return (
+    <>
+      <ActiveApp />
+      <Analytics />
+    </>
+  );
 }
 
 function ActiveApp() {
