@@ -41,6 +41,8 @@ export function useUploadStatus() {
     uploader.onReceived = () => {
       void queryClient.invalidateQueries({ queryKey: ['upload-status'] });
       void queryClient.invalidateQueries({ queryKey: ['photos'] });
+      // A file already stored moves none of the counts above, but can still join an album.
+      void queryClient.invalidateQueries({ queryKey: ['albums'] });
     };
     return () => {
       uploader.onReceived = null;

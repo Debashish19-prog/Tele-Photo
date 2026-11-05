@@ -136,6 +136,8 @@ export class Library {
           tg_message_id: item.messageId,
           // Telegram usually has a thumbnail, so nothing needs downloading. If not, one gets built.
           preview_state: item.hasThumb ? 'ready' : 'missing',
+          // Known straight away, so a rebuild never shows these in Photos while it is still running.
+          album_only: sync.isAlbumOnly(facts.sha256),
         });
         if (batch.length >= SCAN_BATCH) await flush();
       }

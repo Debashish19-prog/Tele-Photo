@@ -66,7 +66,7 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
       } else if (entry.stage === 'error') {
         out.push({ ...base, tone: 'error', label: entry.error ?? 'Failed.', progress: null, onRetry: entry.file ? () => uploader.retry(entry.key) : undefined });
       } else if (entry.stage === 'duplicate') {
-        out.push({ ...base, tone: 'info', label: 'Already in your library', progress: null });
+        out.push({ ...base, tone: 'info', label: entry.albumId !== null ? 'Already stored, so it was just added to the album' : 'Already in your library', progress: null });
       } else if (entry.stage === 'restored') {
         out.push({ ...base, tone: 'info', label: 'Back from Trash', progress: null });
       } else if (remote) {

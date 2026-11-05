@@ -1,5 +1,5 @@
 import { LiquiGlass } from '@liqui-design/glass';
-import { useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { LogOut, Moon, RefreshCw, Search, ShieldCheck, Sun, SunMoon, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
@@ -181,7 +181,7 @@ function UserMenu({ account, onSignedOut }: { account: Account; onSignedOut: () 
   );
 }
 
-function DropOverlay({ onFiles }: { onFiles: (files: File[]) => void }) {
+function DropOverlay({ onFiles, albumTitle }: { onFiles: (files: File[]) => void; albumTitle: string | null }) {
   const [dragging, setDragging] = useState(false);
   const depth = useRef(0);
 
@@ -232,8 +232,10 @@ function DropOverlay({ onFiles }: { onFiles: (files: File[]) => void }) {
           <motion.div initial={{ scale: 0.94 }} animate={{ scale: 1 }}>
             <LiquiGlass radius={32} elevated frost={0.7} blur={2} refraction={110} bezel={30} contentClassName="flex flex-col items-center gap-3 px-14 py-11 text-center">
               <Upload className="size-10 text-[var(--lq-accent)]" aria-hidden="true" />
-              <p className="text-lg font-semibold">Drop to upload</p>
-              <p className="text-[13px] text-[var(--lq-text-dim)]">Photos and whole folders, up to 1.95 GB each</p>
+              <p className="max-w-[60vw] truncate text-lg font-semibold">{albumTitle ? `Drop to add to ${albumTitle}` : 'Drop to upload'}</p>
+              <p className="text-[13px] text-[var(--lq-text-dim)]">
+                {albumTitle ? 'These stay in this album and will not appear in Photos' : 'Photos and whole folders, up to 1.95 GB each'}
+              </p>
             </LiquiGlass>
           </motion.div>
         </motion.div>
@@ -299,8 +301,16 @@ export function Shell({ account, storage, onReauth }: ShellProps) {
     window.scrollTo(0, 0);
   }, [path]);
 
+  // While an album is open, new files go into it rather than into Photos.
+  const openAlbum = /^\/albums\/(\d+)$/.exec(path);
+  const uploadAlbumId = openAlbum ? Number(openAlbum[1]) : null;
+  const uploadAlbum = useQuery({ queryKey: ['albums', uploadAlbumId], queryFn: () => api.album(uploadAlbumId!), enabled: uploadAlbumId !== null });
+  const uploadAlbumTitle = uploadAlbumId !== null ? (uploadAlbum.data?.title ?? null) : null;
+  const uploadTarget = useRef(uploadAlbumId);
+  uploadTarget.current = uploadAlbumId;
+
   const addFiles = useRef((files: File[]) => {
-    const { added, skipped } = uploader.add(files);
+    const { added, skipped } = uploader.add(files, uploadTarget.current);
     if (skipped > 0) {
       toast.add({
         title: `${formatCount(skipped, 'file')} skipped`,
@@ -331,7 +341,12 @@ export function Shell({ account, storage, onReauth }: ShellProps) {
       <header className="fixed top-3 right-3 left-3 z-20 flex items-center gap-2.5 min-[720px]:right-5 min-[720px]:left-5">
         <Brand />
         <SearchBox />
-        <CrystalButton onClick={openFilePicker} aria-label="Upload photos" className="h-12 flex-none px-[22px] max-[519px]:w-12 max-[519px]:px-0">
+        <CrystalButton
+          onClick={openFilePicker}
+          aria-label={uploadAlbumTitle ? `Upload photos to ${uploadAlbumTitle}` : 'Upload photos'}
+          title={uploadAlbumTitle ? `Upload to ${uploadAlbumTitle} only` : undefined}
+          className="h-12 flex-none px-[22px] max-[519px]:w-12 max-[519px]:px-0"
+        >
           <Upload className="size-4" aria-hidden="true" />
           <span className="max-[519px]:hidden">Upload</span>
         </CrystalButton>
@@ -376,7 +391,7 @@ export function Shell({ account, storage, onReauth }: ShellProps) {
       </main>
       <NavStrip />
       <UploadPanel status={status} />
-      <DropOverlay onFiles={addFiles} />
+      <DropOverlay onFiles={addFiles} albumTitle={uploadAlbumTitle} />
       <Toaster className="lq-solid max-[1240px]:bottom-[112px]! sm:right-auto sm:left-5 max-sm:right-3 max-sm:left-3" />
     </>
   );

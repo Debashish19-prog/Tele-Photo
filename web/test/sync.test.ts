@@ -1,4 +1,4 @@
-import { afterEach, beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { memoryDisk } from '../src/engine/fake';
 import { decodeDoc, encodeDoc } from '../src/engine/sync';
 import { Device, makeJpeg } from './helpers';
@@ -152,6 +152,102 @@ describe('between devices', () => {
     await laptop.catchUp();
     expect(laptop.engine.albums()).toEqual([]);
     expect(laptop.names()).toEqual(['a.jpg']);
+  });
+
+  describe('photos uploaded straight into an album', () => {
+    const upload = async (title: string, color: string, filename: string) => {
+      const { id } = await phone.engine.createAlbum(title);
+      const { id: photo } = await phone.addInto(id, makeJpeg({ color }), filename);
+      await phone.engine.queue.drain();
+      await phone.saveState();
+      return { album: id, photo };
+    };
+
+    it('stay out of Photos on another device too', async () => {
+      await upload('Private', '#606060', 'a.jpg');
+      laptop.storage.fetchCount = 0;
+      await laptop.catchUp();
+
+      const album = laptop.engine.albums()[0]!;
+      expect(album).toMatchObject({ title: 'Private', photoCount: 1, onlyHereCount: 1 });
+      expect(laptop.names({ album: album.id })).toEqual(['a.jpg']);
+      expect(laptop.names()).toEqual([]);
+      expect(laptop.storage.fetchCount).toBe(0);
+    });
+
+    it('leave Photos once the state file catches up, if the photo got there first', async () => {
+      const { id } = await phone.engine.createAlbum('Private');
+      await phone.addInto(id, makeJpeg({ color: '#666666' }), 'a.jpg');
+      await phone.engine.queue.drain();
+
+      // The phone has sent the photo but not yet saved which album it belongs to.
+      await laptop.catchUp();
+      expect(laptop.names()).toEqual(['a.jpg']);
+
+      await phone.saveState();
+      await laptop.catchUp();
+      expect(laptop.names()).toEqual([]);
+      expect(laptop.names({ album: laptop.engine.albums()[0]!.id })).toEqual(['a.jpg']);
+    });
+
+    it('stay out of Photos after a browser loses everything', async () => {
+      await upload('Private', '#616161', 'a.jpg');
+      await phone.wipeBrowser();
+      await phone.signIn();
+
+      const album = phone.engine.albums()[0]!;
+      expect(phone.names({ album: album.id })).toEqual(['a.jpg']);
+      expect(phone.names()).toEqual([]);
+    });
+
+    it('never appear in Photos partway through a rebuild', async () => {
+      await upload('Private', '#626262', 'a.jpg');
+      await laptop.engine.sync.pull();
+      const insert = vi.spyOn(laptop.engine.store, 'insertPhotos');
+      laptop.engine.library.startScan({ full: false });
+      await laptop.engine.whenIdle();
+
+      const inserted = insert.mock.calls.flatMap(([rows]) => rows);
+      expect(inserted.map((r) => [r.filename, r.album_only])).toEqual([['a.jpg', true]]);
+    });
+
+    it('go to Trash on both devices when the album is deleted', async () => {
+      const { album } = await upload('Gone', '#636363', 'a.jpg');
+      await laptop.catchUp();
+
+      await phone.engine.deleteAlbum(album);
+      await phone.saveState();
+      await laptop.catchUp();
+
+      expect(laptop.engine.albums()).toEqual([]);
+      expect(laptop.names()).toEqual([]);
+      expect(laptop.names({ view: 'trash' })).toEqual(['a.jpg']);
+    });
+
+    it('move to Photos on both devices when removed from their album', async () => {
+      const { album, photo } = await upload('Moved', '#646464', 'a.jpg');
+      await laptop.catchUp();
+
+      await phone.engine.removeFromAlbum(album, [photo]);
+      await phone.saveState();
+      await laptop.catchUp();
+
+      expect(laptop.names()).toEqual(['a.jpg']);
+      expect(idOn(laptop, 'a.jpg')).toBeDefined();
+      expect(laptop.engine.photo(idOn(laptop, 'a.jpg')).albumOnly).toBe(false);
+    });
+
+    it('are read correctly from a state file saved before this existed', async () => {
+      const a = await phone.stored(makeJpeg({ color: '#656565' }), 'a.jpg');
+      await phone.engine.setFavorite([a], true);
+      await phone.saveState();
+      const file = await phone.storage.readState(CTX, null);
+      const doc = await decodeDoc(file.changed ? file.file!.bytes : new Uint8Array());
+      expect(Object.values(doc!.photos).every((record) => record.o === undefined)).toBe(true);
+
+      await laptop.catchUp();
+      expect(laptop.names()).toEqual(['a.jpg']);
+    });
   });
 
   it('a permanent delete reaches the other device, and a scan cannot bring it back', async () => {

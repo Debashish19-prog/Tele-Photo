@@ -27,7 +27,7 @@ Once you have signed in, open the account menu and choose **Check Telegram stora
 
 It sends a few generated images to your library channel, downloads each one, compares SHA-256 hashes, and deletes them again. It also saves and reads back the file that holds your albums. Every line should get a tick. This is the one check the automated tests cannot do for you, because they have no Telegram account to use.
 
-**Do this before trusting it with anything.** The automated tests run the real Telegram client code with the network replaced, and a real connection has been made from the browser to Telegram, but no real account has been through this version yet.
+**Do this before trusting it with anything.** The automated tests run the real Telegram client code with the network replaced, so they cannot do this part. The check has passed on a real account from a local production build. A live deployment, and other browsers and phones, can behave differently, so run it again on the ones you will use.
 
 ### Run it on your own computer
 
@@ -68,10 +68,25 @@ Photos go directly from the browser to Telegram over an encrypted WebSocket. No 
 | Original photos | Your Telegram channel | No |
 | Capture date, dimensions, content hash | Telegram (in each caption) and the local index | No |
 | A small thumbnail | Telegram (attached to each photo) and a local cache | No |
-| Albums, favorites, Trash, camera details | A file pinned in your Telegram channel, and locally | No, as long as it had time to save |
+| Albums, favorites, Trash, camera details, which photos stay out of Photos | A file pinned in your Telegram channel, and locally | No, as long as it had time to save |
 | Larger previews for the viewer | Local cache, rebuilt from the original when needed | No |
 
 To rebuild, just sign in. The app finds your existing channel and restores the library, without downloading your originals. You can also run this any time from the account menu with **Restore from Telegram**. Libraries uploaded by the earlier server version are found the same way, though albums and favorites from its `data/` folder do not carry over.
+
+### Photos that live only in an album
+
+Open an album and choose **Add photos**:
+
+- **From your library** adds photos you already have. They stay in Photos too.
+- **Upload new photos** keeps them in that album only. They do not appear in Photos or in search. While an album is open, the **Upload** button and drag and drop work the same way.
+
+These are stored like any other photo, at full quality in the same Telegram channel. The separation is in the app, so they are still visible to anyone looking through the channel in Telegram itself.
+
+- **Favorites and Trash** still include them, as both come from something you did to that photo.
+- **A file you have already stored** is not uploaded again. It joins the album, and stays in Photos if it was there. Uploading a file to Photos when it is only in an album brings it into Photos.
+- **Removing one from its last album** moves it to Photos, and the app tells you when that happens.
+- **Deleting an album** moves the photos uploaded only to it to Trash, and the confirmation says how many. Restoring one puts it in Photos, since its album has gone.
+- **If the file holding your albums is ever lost**, these photos appear in Photos, so none can end up out of reach.
 
 ### Using more than one device
 
@@ -139,7 +154,7 @@ These were taken in demo mode with stock sample photos from [Lorem Picsum](https
 <table>
 <tr><td width="50%" valign="top"><a href="docs/screenshots/add-to-album.webp"><img src="docs/screenshots/add-to-album.webp" alt="Dialog for adding photos to an album"></a><br>Add selected photos to a new or existing album.</td><td width="50%" valign="top"><a href="docs/screenshots/albums.webp"><img src="docs/screenshots/albums.webp" alt="Albums page with one album"></a><br>Your albums.</td></tr>
 <tr><td width="50%" valign="top"><a href="docs/screenshots/album.webp"><img src="docs/screenshots/album.webp" alt="Album page with four photos"></a><br>Inside an album.</td><td width="50%" valign="top"><a href="docs/screenshots/album-renamed.webp"><img src="docs/screenshots/album-renamed.webp" alt="Album page after renaming"></a><br>A renamed album.</td></tr>
-<tr><td width="50%" valign="top"><a href="docs/screenshots/album-menu.webp"><img src="docs/screenshots/album-menu.webp" alt="Album options menu"></a><br>Rename or delete an album. Deleting it keeps the photos.</td><td width="50%"></td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/album-menu.webp"><img src="docs/screenshots/album-menu.webp" alt="Album options menu"></a><br>Rename or delete an album. Photos from your library stay there, and any uploaded only to this album move to Trash.</td><td width="50%"></td></tr>
 </table>
 
 ### Trash

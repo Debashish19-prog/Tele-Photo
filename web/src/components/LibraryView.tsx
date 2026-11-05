@@ -115,11 +115,7 @@ export function LibraryView({ query, mode, heading, empty, albumId, picker }: Li
             onTrash: () => void actions.trash(ids).then(selection.clear),
             ...(mode === 'album' && albumId
               ? {
-                  onRemoveFromAlbum: () =>
-                    void api.removeFromAlbum(albumId, ids).then(() => {
-                      actions.refresh();
-                      selection.clear();
-                    }, actions.fail),
+                  onRemoveFromAlbum: () => void actions.removeFromAlbum(albumId, ids).then(selection.clear),
                   ...(ids.length === 1
                     ? {
                         onSetCover: () =>

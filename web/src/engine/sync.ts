@@ -23,6 +23,8 @@ interface PhotoRecord {
   d?: 1;
   /** Camera details. Not stored in captions, and searched on, so they are carried here. */
   m?: Partial<CameraMeta>;
+  /** Uploaded straight into an album, so it stays out of Photos. */
+  o?: 1;
 }
 
 interface AlbumRecord {
@@ -68,6 +70,7 @@ function photoRecord(row: PhotoRow): PhotoRecord {
     u: row.changed_at,
     ...(row.favorite ? { f: 1 as const } : {}),
     ...(row.trashed_at !== null ? { t: row.trashed_at } : {}),
+    ...(row.album_only ? { o: 1 as const } : {}),
     ...(Object.keys(m).length > 0 ? { m } : {}),
   };
 }
@@ -154,6 +157,10 @@ export class StateSync {
     return this.doc.photos[sha256]?.d === 1;
   }
 
+  isAlbumOnly(sha256: string): boolean {
+    return this.doc.photos[sha256]?.o === 1;
+  }
+
   private merge(remote: StateDoc): void {
     for (const [sha, record] of Object.entries(remote.photos)) {
       const current = this.doc.photos[sha];
@@ -191,7 +198,7 @@ export class StateSync {
         continue;
       }
       const camera = Object.fromEntries(CAMERA_FIELDS.map((field) => [field, record.m?.[field] ?? row[field]]));
-      changes.push({ row, change: { favorite: record.f === 1, trashed_at: record.t ?? null, changed_at: record.u, ...camera } });
+      changes.push({ row, change: { favorite: record.f === 1, trashed_at: record.t ?? null, album_only: record.o === 1, changed_at: record.u, ...camera } });
     }
     await store.applyRemote(changes);
     if (removed.length > 0) {

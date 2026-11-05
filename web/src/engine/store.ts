@@ -37,6 +37,8 @@ export interface PhotoRow extends CameraMeta {
   trashed_at: number | null;
   /** When favorite, Trash or camera details last changed, which decides who wins between devices. */
   changed_at: number;
+  /** Uploaded straight into an album, so it stays out of Photos for as long as an album holds it. */
+  album_only: boolean;
 }
 
 export interface AlbumRow {
@@ -70,7 +72,7 @@ export type NewPhoto = Pick<
   | 'sha256' | 'filename' | 'mime' | 'size' | 'width' | 'height' | 'taken_at' | 'taken_source'
   | 'camera_make' | 'camera_model' | 'lens' | 'iso' | 'f_number' | 'exposure_time' | 'focal_length'
   | 'gps_lat' | 'gps_lon' | 'status' | 'tg_message_id' | 'preview_state'
-> & { changed_at?: number };
+> & { changed_at?: number; album_only?: boolean };
 
 export type PhotoView =
   | { kind: 'timeline' }
@@ -161,7 +163,11 @@ export class Store {
       request(tx.objectStore('albums').getAll() as IDBRequest<AlbumRow[]>),
     ]);
     keys.forEach((key, i) => this.meta.set(String(key), values[i]));
-    for (const row of photos) this.index(row);
+    for (const row of photos) {
+      // Saved before album-only photos existed.
+      row.album_only ??= false;
+      this.index(row);
+    }
     for (const row of albums) this.albums.set(row.id, row);
   }
 
@@ -260,6 +266,7 @@ export class Store {
         favorite: false,
         trashed_at: null,
         changed_at: photo.changed_at ?? 0,
+        album_only: photo.album_only ?? false,
       };
       this.index(row);
       rows.push(row);
@@ -292,6 +299,7 @@ export class Store {
   listPhotos(view: PhotoView, query: string): PhotoRow[] {
     const tokens = query.toLowerCase().split(/\s+/).filter(Boolean).slice(0, 8);
     const album = view.kind === 'album' ? this.albums.get(view.albumId) : null;
+    const held = view.kind === 'timeline' ? this.heldByAlbums() : null;
 
     const matchesToken = (photo: PhotoRow, token: string) => {
       const fields = [photo.filename, photo.camera_make, photo.camera_model, photo.lens, photo.taken_at];
@@ -303,6 +311,7 @@ export class Store {
     const rows: PhotoRow[] = [];
     for (const photo of this.photos.values()) {
       if (view.kind === 'trash' ? photo.trashed_at === null : photo.trashed_at !== null) continue;
+      if (held && photo.album_only && held.has(photo.sha256)) continue;
       if (view.kind === 'favorites' && !photo.favorite) continue;
       if (view.kind === 'album' && !album?.photos[photo.sha256]) continue;
       if (tokens.every((token) => matchesToken(photo, token))) rows.push(photo);
@@ -461,7 +470,26 @@ export class Store {
 
   // ---- albums --------------------------------------------------------------------------------
 
-  listAlbums(): (AlbumRow & { photo_count: number; cover_id: number | null })[] {
+  /**
+   * Every photo some album holds. An album-only photo that nothing holds is shown in Photos, so
+   * that however it came about, such as an album deleted on another device, a photo in Telegram
+   * always has somewhere to be seen.
+   */
+  private heldByAlbums(): Set<string> {
+    const held = new Set<string>();
+    for (const album of this.albums.values()) {
+      if (album.deleted_at !== null) continue;
+      for (const sha of Object.keys(album.photos)) held.add(sha);
+    }
+    return held;
+  }
+
+  listAlbums(): (AlbumRow & { photo_count: number; cover_id: number | null; only_here_count: number })[] {
+    const holders = new Map<string, number>();
+    for (const album of this.albums.values()) {
+      if (album.deleted_at !== null) continue;
+      for (const sha of Object.keys(album.photos)) holders.set(sha, (holders.get(sha) ?? 0) + 1);
+    }
     return [...this.albums.values()]
       .filter((a) => a.deleted_at === null)
       .sort((a, b) => b.updated_at - a.updated_at || b.id - a.id)
@@ -471,7 +499,8 @@ export class Store {
           .filter((p): p is PhotoRow => p !== undefined && p.trashed_at === null);
         const chosen = album.cover_sha ? visible.find((p) => p.sha256 === album.cover_sha) : undefined;
         const newest = visible.reduce<PhotoRow | undefined>((best, p) => (!best || p.taken_at > best.taken_at ? p : best), undefined);
-        return { ...album, photo_count: visible.length, cover_id: (chosen ?? newest)?.id ?? null };
+        const onlyHere = visible.filter((p) => p.album_only && holders.get(p.sha256) === 1);
+        return { ...album, photo_count: visible.length, cover_id: (chosen ?? newest)?.id ?? null, only_here_count: onlyHere.length };
       });
   }
 
@@ -536,6 +565,45 @@ export class Store {
     return this.changeAlbum(id, (album) => {
       for (const photo of this.getPhotos(photoIds)) delete album.photos[photo.sha256];
     });
+  }
+
+  /** Album-only photos that would have no album left if this one went away. Trashed ones count. */
+  photosOnlyIn(id: number): PhotoRow[] {
+    const album = this.getAlbum(id);
+    if (!album) return [];
+    const others = new Set<string>();
+    for (const other of this.albums.values()) {
+      if (other.id === id || other.deleted_at !== null) continue;
+      for (const sha of Object.keys(other.photos)) others.add(sha);
+    }
+    return Object.keys(album.photos)
+      .map((sha) => this.bySha.get(sha))
+      .filter((p): p is PhotoRow => p !== undefined && p.album_only && !others.has(p.sha256));
+  }
+
+  async setAlbumOnly(ids: number[], albumOnly: boolean): Promise<void> {
+    const now = Date.now();
+    const rows = this.getPhotos(ids);
+    for (const row of rows) Object.assign(row, { album_only: albumOnly, changed_at: now });
+    await this.writePhotos(rows);
+    this.onStateChange?.();
+  }
+
+  /** Makes ordinary library photos of any of these that no album holds any more. Returns how many. */
+  async releaseAlbumOnly(ids: number[]): Promise<number> {
+    const held = this.heldByAlbums();
+    const rows = this.getPhotos(ids).filter((p) => p.album_only && !held.has(p.sha256));
+    if (rows.length > 0) await this.setAlbumOnly(rows.map((p) => p.id), false);
+    return rows.length;
+  }
+
+  /** For photos whose album is going away. Once restored they have no album to return to, so they count as library photos. */
+  async trashAlbumOnly(ids: number[]): Promise<void> {
+    const now = Date.now();
+    const rows = this.getPhotos(ids);
+    for (const row of rows) Object.assign(row, { album_only: false, trashed_at: row.trashed_at ?? now, changed_at: now });
+    await this.writePhotos(rows);
+    this.onStateChange?.();
   }
 
   /** Takes another device's version of an album, or creates it if this device has not seen it. */

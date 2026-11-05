@@ -58,6 +58,17 @@ export function usePhotoActions() {
           toast.add({ title: `Added ${formatCount(ids.length, 'photo')} to ${title}` });
         }, fail),
 
+      removeFromAlbum: (albumId: number, ids: number[]) =>
+        api.removeFromAlbum(albumId, ids).then(({ movedToPhotos }) => {
+          refresh();
+          if (movedToPhotos > 0) {
+            toast.add({
+              title: `${formatCount(movedToPhotos, 'photo')} moved to Photos`,
+              description: 'Uploaded only to this album, so removing it from here put it in your library.',
+            });
+          }
+        }, fail),
+
       createAlbumWith: (title: string, ids: number[]) =>
         api.createAlbum(title, ids).then(() => {
           refresh();

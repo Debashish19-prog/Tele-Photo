@@ -131,6 +131,11 @@ export class Device {
     return this.engine.ingest(new Blob([bytes as BlobPart]), filename, lastModified);
   }
 
+  /** Uploads into an album from outside the library, keeping the photo out of Photos. */
+  addInto(albumId: number, bytes: Uint8Array, filename = 'photo.jpg'): Promise<IngestResult> {
+    return this.engine.ingest(new Blob([bytes as BlobPart]), filename, null, undefined, { albumId });
+  }
+
   async addOk(bytes: Uint8Array, filename = 'photo.jpg', lastModified: string | null = null): Promise<number> {
     return (await this.add(bytes, filename, lastModified)).id;
   }

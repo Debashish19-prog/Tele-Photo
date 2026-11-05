@@ -181,6 +181,34 @@ function NewAlbumDialog({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
+/** The two ways in: photos already in the library stay there too, while new uploads live only in the album. */
+function AddPhotosMenu({ albumId }: { albumId: number }) {
+  const [, navigate] = useLocation();
+  return (
+    <Menu>
+      <MenuTrigger render={<Button variant="accent" size="sm" />}>
+        <Plus className="size-3.5" aria-hidden="true" /> Add photos
+      </MenuTrigger>
+      <MenuContent align="end" className="lq-solid" glass={{ frost: 1, blur: 6 }}>
+        <MenuItem onClick={() => navigate(`/?addTo=${albumId}`)}>
+          <Images className="size-4 flex-none" aria-hidden="true" />
+          <span>
+            <span className="block">From your library</span>
+            <span className="block text-[12px] font-normal text-[var(--lq-text-dim)]">They stay in Photos too</span>
+          </span>
+        </MenuItem>
+        <MenuItem onClick={openFilePicker}>
+          <Upload className="size-4 flex-none" aria-hidden="true" />
+          <span>
+            <span className="block">Upload new photos</span>
+            <span className="block text-[12px] font-normal text-[var(--lq-text-dim)]">Only in this album, not in Photos</span>
+          </span>
+        </MenuItem>
+      </MenuContent>
+    </Menu>
+  );
+}
+
 function AlbumCover({ id }: { id: number }) {
   const { url } = useMedia(id, 'thumb');
   return url ? <img src={url} alt="" className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" /> : null;
@@ -247,6 +275,8 @@ export function AlbumPage() {
   }
 
   const title = album.data?.title ?? '';
+  const onlyHere = album.data?.onlyHereCount ?? 0;
+  const subtitle = album.data ? `${formatCount(album.data.photoCount, 'item')}${onlyHere > 0 ? ` · ${onlyHere.toLocaleString()} only in this album` : ''}` : undefined;
 
   return (
     <>
@@ -259,10 +289,8 @@ export function AlbumPage() {
             <Link href="/albums" className="mt-2 inline-flex items-center gap-1 text-[13px] font-medium text-[var(--lq-text-dim)] hover:text-[var(--lq-text)]">
               <ArrowLeft className="size-3.5" aria-hidden="true" /> Albums
             </Link>
-            <PageHeading title={title || ' '} subtitle={album.data ? formatCount(album.data.photoCount, 'item') : undefined}>
-              <Button variant="accent" size="sm" onClick={() => navigate(`/?addTo=${id}`)}>
-                <Plus className="size-3.5" aria-hidden="true" /> Add photos
-              </Button>
+            <PageHeading title={title || ' '} subtitle={subtitle}>
+              <AddPhotosMenu albumId={id} />
               <Menu>
                 <Tip label="More options">
                   <MenuTrigger aria-label="More options" className="grid size-9 cursor-pointer place-items-center rounded-full hover:bg-[var(--app-tile)]">
@@ -276,11 +304,14 @@ export function AlbumPage() {
                     onClick={() =>
                       setConfirm({
                         title: `Delete "${title}"?`,
-                        description: 'Only the album goes away. The photos in it stay in your library and in Telegram.',
+                        description:
+                          onlyHere > 0
+                            ? `${formatCount(onlyHere, 'photo')} uploaded only to this album will move to Trash. Restoring one puts it in Photos. Anything from your library stays there.`
+                            : 'Only the album goes away. The photos in it stay in your library and in Telegram.',
                         confirm: 'Delete album',
                         onConfirm: () =>
                           api.deleteAlbum(id).then(() => {
-                            void queryClient.invalidateQueries({ queryKey: ['albums'] });
+                            actions.refresh();
                             navigate('/albums');
                           }, actions.fail),
                       })
@@ -295,9 +326,13 @@ export function AlbumPage() {
         }
         empty={
           <EmptyState icon={<Images className="size-9" aria-hidden="true" />} title="This album is empty">
-            <div className="mt-2 flex justify-center">
-              <Button variant="accent" onClick={() => navigate(`/?addTo=${id}`)}>
-                <Plus className="size-4" aria-hidden="true" /> Add photos
+            <p>Add photos you already have, or upload new ones. New uploads stay in this album and do not appear in Photos.</p>
+            <div className="mt-4 flex flex-wrap justify-center gap-2">
+              <Button variant="accent" onClick={openFilePicker}>
+                <Upload className="size-4" aria-hidden="true" /> Upload new photos
+              </Button>
+              <Button onClick={() => navigate(`/?addTo=${id}`)}>
+                <Images className="size-4" aria-hidden="true" /> From your library
               </Button>
             </div>
           </EmptyState>

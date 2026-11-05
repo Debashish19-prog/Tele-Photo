@@ -516,6 +516,224 @@ describe('the engine', () => {
     });
   });
 
+  describe('uploading straight into an album', () => {
+    beforeEach(() => d.signIn());
+
+    const album = async (title = 'Trip') => (await e().createAlbum(title)).id;
+    const trashNames = () => d.names({ view: 'trash' });
+
+    it('keeps the photo in its album and out of Photos and search', async () => {
+      const id = await album();
+      const bytes = makeJpeg({ color: '#101010', date: '2024:03:04 05:06:07' });
+      const { id: photo, duplicate } = await d.addInto(id, bytes, 'beach.jpg');
+      await e().queue.drain();
+
+      expect(duplicate).toBe(false);
+      expect(d.names({ album: id })).toEqual(['beach.jpg']);
+      expect(d.names()).toEqual([]);
+      expect(d.names({ q: 'beach' })).toEqual([]);
+      expect(e().albums()[0]).toMatchObject({ photoCount: 1, coverId: photo, onlyHereCount: 1 });
+      expect(e().photo(photo)).toMatchObject({ albumOnly: true, status: 'stored', albums: [{ id, title: 'Trip' }] });
+    });
+
+    it('still stores the untouched original in Telegram', async () => {
+      const bytes = makeJpeg({ color: '#111111' });
+      const { id: photo } = await d.addInto(await album(), bytes);
+      await e().queue.drain();
+      expect(d.storage.fetchCount).toBe(0);
+      expect(e().photo(photo).telegramMessageId).not.toBeNull();
+      await d.reload();
+      expect(sha256(await blobBytes(await e().original(photo)))).toBe(sha256(bytes));
+      expect(d.storage.fetchCount).toBe(1);
+    });
+
+    it('leaves photos picked from the library in Photos as well', async () => {
+      const id = await album();
+      const photo = await d.stored(makeJpeg({ color: '#121212' }), 'kept.jpg');
+      await e().addToAlbum(id, [photo]);
+
+      expect(d.names()).toEqual(['kept.jpg']);
+      expect(d.names({ album: id })).toEqual(['kept.jpg']);
+      expect(e().photo(photo).albumOnly).toBe(false);
+      expect(e().albums()[0]!.onlyHereCount).toBe(0);
+    });
+
+    it('still shows in Favorites once starred, and returns to its album from Trash', async () => {
+      const id = await album();
+      const { id: photo } = await d.addInto(id, makeJpeg({ color: '#131313' }), 'star.jpg');
+      await e().queue.drain();
+
+      await e().setFavorite([photo], true);
+      expect(d.names({ view: 'favorites' })).toEqual(['star.jpg']);
+
+      await e().setTrashed([photo], true);
+      expect(trashNames()).toEqual(['star.jpg']);
+      expect(d.names({ album: id })).toEqual([]);
+
+      await e().setTrashed([photo], false);
+      expect(d.names({ album: id })).toEqual(['star.jpg']);
+      expect(d.names()).toEqual([]);
+    });
+
+    it('stays out of Photos while any album holds it, and moves there after the last one lets go', async () => {
+      const first = await album('First');
+      const second = await album('Second');
+      const { id: photo } = await d.addInto(first, makeJpeg({ color: '#141414' }), 'both.jpg');
+      await e().queue.drain();
+      await e().addToAlbum(second, [photo]);
+      expect(d.names()).toEqual([]);
+      expect(e().album(first).onlyHereCount).toBe(0);
+
+      expect(await e().removeFromAlbum(first, [photo])).toEqual({ movedToPhotos: 0 });
+      expect(d.names()).toEqual([]);
+      expect(e().album(second).onlyHereCount).toBe(1);
+
+      expect(await e().removeFromAlbum(second, [photo])).toEqual({ movedToPhotos: 1 });
+      expect(d.names()).toEqual(['both.jpg']);
+
+      // It is an ordinary library photo now, so adding it to an album again must not hide it.
+      await e().addToAlbum(first, [photo]);
+      expect(d.names()).toEqual(['both.jpg']);
+    });
+
+    it('moves photos only in a deleted album to Trash, and leaves everything else alone', async () => {
+      const id = await album('Gone');
+      const other = await album('Other');
+      const library = await d.stored(makeJpeg({ color: '#151515' }), 'library.jpg');
+      await e().addToAlbum(id, [library]);
+      const { id: only } = await d.addInto(id, makeJpeg({ color: '#161616' }), 'only.jpg');
+      const { id: shared } = await d.addInto(id, makeJpeg({ color: '#171717' }), 'shared.jpg');
+      const { id: binned } = await d.addInto(id, makeJpeg({ color: '#181818' }), 'binned.jpg');
+      await e().queue.drain();
+      await e().addToAlbum(other, [shared]);
+      await e().setTrashed([binned], true);
+      expect(e().album(id).onlyHereCount).toBe(1);
+
+      expect(await e().deleteAlbum(id)).toEqual({ movedToTrash: 1 });
+
+      expect(d.names()).toEqual(['library.jpg']);
+      expect(d.names({ album: other })).toEqual(['shared.jpg']);
+      expect(trashNames().sort()).toEqual(['binned.jpg', 'only.jpg']);
+      expect(e().photo(shared).albumOnly).toBe(true);
+
+      // Its album has gone, so Photos is the only place left to bring it back to.
+      await e().setTrashed([only], false);
+      expect(d.names().sort()).toEqual(['library.jpg', 'only.jpg']);
+      expect(e().photo(only).albumOnly).toBe(false);
+    });
+
+    it('sends nothing new when the file is already in the library, and keeps it in Photos', async () => {
+      const id = await album();
+      const bytes = makeJpeg({ color: '#191919' });
+      const photo = await d.stored(bytes, 'library.jpg');
+      const result = await d.addInto(id, bytes, 'copy.jpg');
+      await e().queue.drain();
+
+      expect(result).toEqual({ id: photo, duplicate: true, restored: false });
+      expect(d.names()).toEqual(['library.jpg']);
+      expect(d.names({ album: id })).toEqual(['library.jpg']);
+      expect(e().photo(photo).albumOnly).toBe(false);
+    });
+
+    it('brings an album-only photo into Photos when the same file is uploaded there', async () => {
+      const id = await album();
+      const bytes = makeJpeg({ color: '#1a1a1a' });
+      const { id: photo } = await d.addInto(id, bytes, 'moved.jpg');
+      await e().queue.drain();
+
+      expect(await d.add(bytes, 'moved.jpg')).toEqual({ id: photo, duplicate: true, restored: false });
+      expect(d.names()).toEqual(['moved.jpg']);
+      expect(d.names({ album: id })).toEqual(['moved.jpg']);
+    });
+
+    it('adds a file uploaded twice to a second album without moving it to Photos', async () => {
+      const first = await album('First');
+      const second = await album('Second');
+      const bytes = makeJpeg({ color: '#1b1b1b' });
+      const { id: photo } = await d.addInto(first, bytes);
+      await e().queue.drain();
+
+      expect((await d.addInto(second, bytes)).id).toBe(photo);
+      expect(e().photo(photo).albums.map((a) => a.title).sort()).toEqual(['First', 'Second']);
+      expect(d.names()).toEqual([]);
+    });
+
+    it('takes a trashed photo out of Trash and into the album only, as that is where it was just put', async () => {
+      const id = await album();
+      const bytes = makeJpeg({ color: '#1c1c1c' });
+      const photo = await d.stored(bytes, 'back.jpg');
+      await e().setTrashed([photo], true);
+
+      expect(await d.addInto(id, bytes)).toEqual({ id: photo, duplicate: true, restored: true });
+      expect(trashNames()).toEqual([]);
+      expect(d.names({ album: id })).toEqual(['back.jpg']);
+      expect(d.names()).toEqual([]);
+    });
+
+    it('goes to Photos when the album no longer exists', async () => {
+      const id = await album();
+      await e().deleteAlbum(id);
+      await d.addInto(id, makeJpeg({ color: '#1d1d1d' }), 'homeless.jpg');
+      expect(d.names()).toEqual(['homeless.jpg']);
+    });
+
+    it('stays album-only when an interrupted upload is finished from elsewhere', async () => {
+      const id = await album();
+      const bytes = makeJpeg({ color: '#1e1e1e' });
+      d.storage.putDelayMs = 50;
+      const { id: photo } = await d.addInto(id, bytes, 'resume.jpg');
+      await d.reload();
+      expect(e().photo(photo)).toMatchObject({ status: 'failed', error: INTERRUPTED_MESSAGE });
+      expect(d.names()).toEqual([]);
+
+      d.storage.putDelayMs = 0;
+      await d.add(bytes, 'resume.jpg');
+      await e().queue.drain();
+      expect(e().photo(photo).status).toBe('stored');
+      expect(d.names()).toEqual([]);
+      expect(d.names({ album: id })).toEqual(['resume.jpg']);
+    });
+
+    it('never leaves a photo with nowhere to be seen, however its album went away', async () => {
+      const id = await album();
+      const { id: photo } = await d.addInto(id, makeJpeg({ color: '#1f1f1f' }), 'stranded.jpg');
+      await e().queue.drain();
+      // What a damaged state file or a half-finished change from elsewhere can leave behind.
+      await e().store.deleteAlbum(id);
+      expect(d.names()).toEqual(['stranded.jpg']);
+      expect(e().photo(photo).albumOnly).toBe(false);
+
+      const other = await album('Other');
+      await e().addToAlbum(other, [photo]);
+      expect(d.names()).toEqual(['stranded.jpg']);
+    });
+
+    it('treats photos saved before this existed as ordinary library photos', async () => {
+      const photo = await d.stored(makeJpeg({ color: '#202020' }), 'old.jpg');
+      const db = await new Promise<IDBDatabase>((resolve, reject) => {
+        const open = indexedDB.open(d.dbName);
+        open.onsuccess = () => resolve(open.result);
+        open.onerror = () => reject(open.error);
+      });
+      await new Promise<void>((resolve, reject) => {
+        const os = db.transaction('photos', 'readwrite').objectStore('photos');
+        const read = os.get(photo);
+        read.onerror = () => reject(read.error);
+        read.onsuccess = () => {
+          const { album_only: _gone, ...old } = read.result as Record<string, unknown>;
+          const write = os.put(old);
+          write.onsuccess = () => resolve();
+          write.onerror = () => reject(write.error);
+        };
+      });
+      db.close();
+
+      await d.reload();
+      expect(e().store.getPhoto(photo)!.album_only).toBe(false);
+      expect(d.names()).toEqual(['old.jpg']);
+    });
+  });
+
   describe('downloading many photos', () => {
     it('builds a zip whose contents are byte-identical, with clashing names kept apart', async () => {
       await d.signIn();

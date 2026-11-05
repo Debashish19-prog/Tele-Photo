@@ -602,6 +602,7 @@ function InfoPanel({ photo, sideways, onClose }: { photo: PhotoDetail | undefine
                   </Link>
                 ))}
               </div>
+              {photo.albumOnly ? <p className="mt-2 text-[12px] text-white/60">Uploaded here only, so it does not appear in Photos.</p> : null}
             </div>
           ) : null}
         </div>

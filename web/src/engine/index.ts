@@ -78,6 +78,8 @@ export interface PhotoDetail {
   trashedAt: number | null;
   purgeAt: number | null;
   albums: { id: number; title: string }[];
+  /** True when this photo is kept out of Photos, and is only reachable through its albums. */
+  albumOnly: boolean;
 }
 
 export interface Album {
@@ -86,6 +88,8 @@ export interface Album {
   photoCount: number;
   coverId: number | null;
   updatedAt: number;
+  /** Photos uploaded straight into this album that no other album holds, so they go if it goes. */
+  onlyHereCount: number;
 }
 
 export interface QueueItem {
@@ -112,6 +116,11 @@ export interface IngestResult {
   id: number;
   duplicate: boolean;
   restored: boolean;
+}
+
+export interface IngestOptions {
+  /** Uploads into this album only, keeping the photo out of Photos. */
+  albumId?: number;
 }
 
 export interface EngineOptions {
@@ -401,6 +410,7 @@ export class Engine {
 
   photo(id: number): PhotoDetail {
     const p = this.owned(id);
+    const albums = this.store.albumsForPhoto(p.sha256).map((a) => ({ id: a.id, title: a.title }));
     return {
       id: p.id,
       filename: p.filename,
@@ -421,7 +431,8 @@ export class Engine {
       favorite: p.favorite,
       trashedAt: p.trashed_at,
       purgeAt: p.trashed_at ? p.trashed_at + this.retentionDays * 24 * 60 * 60 * 1000 : null,
-      albums: this.store.albumsForPhoto(p.sha256).map((a) => ({ id: a.id, title: a.title })),
+      albums,
+      albumOnly: p.album_only && albums.length > 0,
     };
   }
 
@@ -460,7 +471,7 @@ export class Engine {
   // ---- albums --------------------------------------------------------------------------------
 
   private albumShape(a: ReturnType<Store['listAlbums']>[number]): Album {
-    return { id: a.id, title: a.title, photoCount: a.photo_count, coverId: a.cover_id, updatedAt: a.updated_at };
+    return { id: a.id, title: a.title, photoCount: a.photo_count, coverId: a.cover_id, updatedAt: a.updated_at, onlyHereCount: a.only_here_count };
   }
 
   albums(): Album[] {
@@ -478,7 +489,7 @@ export class Engine {
   async createAlbum(title: string, photoIds: number[] = []): Promise<{ id: number }> {
     this.requireAccount();
     const id = await this.store.createAlbum(albumTitle(title));
-    if (photoIds.length > 0) await this.store.addToAlbum(id, photoIds);
+    if (photoIds.length > 0) await this.addToAlbum(id, photoIds);
     return { id };
   }
 
@@ -491,20 +502,32 @@ export class Engine {
     }
   }
 
-  /** Removes the album only. The photos in it stay in the library. */
-  async deleteAlbum(id: number): Promise<void> {
+  /**
+   * Photos that came from the library stay there. Those uploaded only to this album have nowhere
+   * else to go, so they move to Trash, where they can still be rescued. Trash comes first, so that
+   * being interrupted here can never leave them in Photos.
+   */
+  async deleteAlbum(id: number): Promise<{ movedToTrash: number }> {
     this.album(id);
+    const orphans = this.store.photosOnlyIn(id);
+    const movedToTrash = orphans.filter((p) => p.trashed_at === null).length;
+    await this.store.trashAlbumOnly(orphans.map((p) => p.id));
     await this.store.deleteAlbum(id);
+    return { movedToTrash };
   }
 
   async addToAlbum(id: number, ids: number[]): Promise<void> {
     this.album(id);
+    // Anything being shown in Photos was picked from there, so adding it must not make it vanish.
+    await this.store.releaseAlbumOnly(ids);
     await this.store.addToAlbum(id, ids);
   }
 
-  async removeFromAlbum(id: number, ids: number[]): Promise<void> {
+  /** A photo leaving its last album moves to Photos, rather than being left with nowhere to be seen. */
+  async removeFromAlbum(id: number, ids: number[]): Promise<{ movedToPhotos: number }> {
     this.album(id);
     await this.store.removeFromAlbum(id, ids);
+    return { movedToPhotos: await this.store.releaseAlbumOnly(ids) };
   }
 
   // ---- uploads -------------------------------------------------------------------------------
@@ -513,9 +536,11 @@ export class Engine {
    * Takes in one file: checks it really is an image, recognises it if it has been seen before,
    * makes its thumbnails, and queues it for Telegram. The file's bytes are never modified.
    */
-  async ingest(file: Blob, rawName: string, lastModified: string | null, onProgress: (fraction: number) => void = () => undefined): Promise<IngestResult> {
+  async ingest(file: Blob, rawName: string, lastModified: string | null, onProgress: (fraction: number) => void = () => undefined, options: IngestOptions = {}): Promise<IngestResult> {
     this.requireAccount();
     const { store, queue, media } = this;
+    // Asked each time, as the album may be deleted while a large file is being read. The photo then goes to Photos.
+    const targetAlbum = () => (options.albumId !== undefined && store.getAlbum(options.albumId) ? options.albumId : null);
 
     if (file.size === 0) throw new UserFacingError('EMPTY_FILE', 'This file is empty.');
     if (file.size > MAX_PHOTO_BYTES) throw new UserFacingError('TOO_LARGE', 'This file is larger than the 1.95 GB Telegram accepts in a single upload.', 413);
@@ -531,13 +556,13 @@ export class Engine {
         const shown = await mediaLimiter(() => media.makePreviews(file, type.mime));
         queue.attach(known.id, file, shown?.telegramThumb ?? null);
         await store.rescheduleUpload(known.id, 0, null, false);
+        // Finishing an interrupted upload, so it stays wherever it was first sent, even if added again from elsewhere.
+        const album = targetAlbum();
+        if (album !== null) await store.addToAlbum(album, [known.id]);
         queue.notify();
         return { id: known.id, duplicate: false, restored: false };
       }
-      // Uploading something that is in the Trash means the person wants it back.
-      const restored = known.trashed_at !== null;
-      if (restored) await store.setTrashed([known.id], null);
-      return { id: known.id, duplicate: true, restored };
+      return this.placeKnown(known, targetAlbum());
     }
 
     const fileDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(lastModified ?? '') ? lastModified : null;
@@ -545,8 +570,9 @@ export class Engine {
 
     // The same bytes may have arrived twice at once, in which case the other one has won by now.
     const winner = store.getPhotoBySha(sha256);
-    if (winner) return { id: winner.id, duplicate: true, restored: false };
+    if (winner) return this.placeKnown(winner, targetAlbum());
 
+    const album = targetAlbum();
     const hasCamera = [meta.camera_make, meta.camera_model, meta.lens, meta.iso, meta.f_number, meta.exposure_time, meta.focal_length, meta.gps_lat, meta.gps_lon].some((v) => v !== null);
     const id = await store.insertPhoto({
       sha256,
@@ -569,16 +595,35 @@ export class Engine {
       status: 'queued',
       tg_message_id: null,
       preview_state: shown ? 'ready' : 'unavailable',
-      changed_at: hasCamera ? Date.now() : 0,
+      changed_at: hasCamera || album !== null ? Date.now() : 0,
+      album_only: album !== null,
     });
     if (shown) {
       await store.cacheThumb(sha256, shown.thumb);
       await store.cachePreview(sha256, shown.preview);
     }
     queue.attach(id, file, shown?.telegramThumb ?? null);
+    if (album !== null) await store.addToAlbum(album, [id]);
     if (hasCamera) this.sync.markDirty();
     queue.notify();
     return { id, duplicate: false, restored: false };
+  }
+
+  /** The same bytes again. Nothing new goes to Telegram, but where the person put them still counts. */
+  private async placeKnown(known: PhotoRow, album: number | null): Promise<IngestResult> {
+    const { store } = this;
+    // Uploading something that is in the Trash means the person wants it back.
+    const restored = known.trashed_at !== null;
+    if (restored) await store.setTrashed([known.id], null);
+    if (album !== null) {
+      await store.addToAlbum(album, [known.id]);
+      // It had left the library, so it comes back to the one place it was just put.
+      if (restored && !known.album_only) await store.setAlbumOnly([known.id], true);
+    } else if (known.album_only) {
+      // Uploaded to Photos on purpose, so it belongs there now, as well as in its albums.
+      await store.setAlbumOnly([known.id], false);
+    }
+    return { id: known.id, duplicate: true, restored };
   }
 
   uploadStatus(): UploadStatus {
