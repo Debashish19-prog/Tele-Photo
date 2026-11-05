@@ -587,7 +587,7 @@ export function TabBar({ glass, lens, className, children, ...props }: TabBarPro
     if (!item || item.hasAttribute('data-disabled') || (item as HTMLButtonElement).disabled) return;
     if (sunk.current) sunk.current.style.scale = '1';
     pressedItem.current = item;
-    sunk.current = item.firstElementChild as HTMLElement | null;
+    sunk.current = item.querySelector<HTMLElement>('[data-tabbar-sink]') ?? (item.firstElementChild as HTMLElement | null);
     if (sunk.current) sunk.current.style.scale = `${1 - PRESS_SINK}`;
 
     if (isSearch(item)) {
@@ -779,7 +779,7 @@ export function TabBarItem({
     >
       {/* The sink target. Scaling the button would move the box the pill is
           measured against, so the press scales its contents instead. */}
-      <span className="pointer-events-none flex flex-col items-center gap-[3px] transition-[scale] duration-150">
+      <span data-tabbar-sink className="pointer-events-none flex flex-col items-center gap-[3px] transition-[scale] duration-150">
         {icon ? (
           <span className="relative flex items-center justify-center [&_svg]:size-[22px]">
             {icon}

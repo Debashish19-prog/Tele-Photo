@@ -147,9 +147,9 @@ body {
 }
 
 /*
- * One capsule of rippled glass with plain text in it, and a solid white capsule that slides to the
- * current tab and thins to a clear lens under a finger (the pill in tab-bar.tsx). The tint is what
- * keeps white text readable over the brightest photo that can scroll behind it.
+ * One capsule of rippled glass holding a metal-ringed button per tab, and a solid white capsule that
+ * slides to the current tab and thins to a clear lens under a finger (the pill in tab-bar.tsx). The
+ * tint is what keeps white text readable over the brightest photo that can scroll behind it.
  */
 .nav-strip {
   --lq-tint: rgb(10 18 34 / 0.6);
@@ -176,25 +176,8 @@ body {
   --lq-highlight: #ffffff;
 }
 
-.nav-strip [role='tab'] {
-  color: #ffffff;
-}
-
-.nav-strip [role='tab']:not([data-active]):hover {
-  background: rgb(255 255 255 / 0.12);
-}
-
-.nav-strip [role='tab'][data-active] {
-  color: #12324a;
-}
-
 .nav-strip [role='tab'][data-active] .nav-label {
   font-weight: 600;
-}
-
-/* The pill is a clear lens while pressed, so the dark label on it would have nothing to stand on. */
-.nav-strip [data-pressing] [role='tab'] {
-  color: #ffffff;
 }
 
 /* White reads on the glass and around the white pill, where the accent colour fought both. */
@@ -212,10 +195,10 @@ body {
   }
 }
 
-/* The narrowest phones give each tab about 70px, and "Favorites" has to fit with room to spare. */
+/* The narrowest phones give each tab about 70px, and "Favorites" has to fit inside its ring with room to spare. */
 @media (max-width: 359px) {
   .nav-strip .nav-label {
-    font-size: 13.5px;
+    font-size: 12.5px;
   }
 }
 
@@ -236,8 +219,8 @@ body:has(.selection-bar:not([data-leaving='true'])) header {
 }
 
 /*
- * The upload button. Motion animates --crystal-hover from 0 to 1, and every colour below is worked
- * out from it, so a change of theme can never strand a colour that Motion wrote inline.
+ * The metal-ringed button. Motion animates --crystal-hover from 0 to 1, and every colour below is
+ * worked out from it, so a change of theme can never strand a colour that Motion wrote inline.
  */
 .crystal {
   --crystal-hover: 0;
@@ -337,6 +320,63 @@ body:has(.selection-bar:not([data-leaving='true'])) header {
   align-items: center;
   gap: 7px;
 }
+
+/*
+ * In the navigation a crystal is hollow, so the rippled glass and the sliding white pill both show
+ * through the ring. The bar is dark glass in either theme, so these colours do not follow the theme.
+ */
+.nav-strip .crystal {
+  --crystal-pill: transparent;
+  --crystal-pill-hover: #ffffff;
+  --crystal-ink: #ffffff;
+  --crystal-ink-hover: #12324a;
+  --crystal-bevel: rgb(255 255 255 / 0.3);
+}
+
+.nav-strip .crystal[data-active] {
+  --crystal-ink: #12324a;
+}
+
+/* The pill is a clear lens while pressed, so the dark label and the hover fill would both hide it. */
+.nav-strip [data-pressing] .crystal {
+  --crystal-ink: #ffffff;
+  --crystal-ink-hover: #ffffff;
+  --crystal-pill-hover: transparent;
+}
+
+/* The bar is already the glass. A shell of its own would add an outline, and frost that hides the ripple. */
+.nav-strip .crystal__shell {
+  display: none;
+}
+
+.nav-strip .crystal__ring {
+  padding: 3.5px;
+  mask: linear-gradient(#000 0 0) content-box exclude, linear-gradient(#000 0 0);
+}
+
+/* A phone has no width to spare, and "Favorites" needs most of what a tab has. */
+@media (max-width: 519px) {
+  .nav-strip .crystal__ring {
+    inset: 1.5px;
+    padding: 2.5px;
+  }
+
+  .nav-strip .crystal__pill {
+    inset: 4px;
+  }
+}
+
+/* A touchscreen has no hover to wake the other rings, and it is usually on a battery. */
+@media (hover: none) {
+  .nav-strip .crystal:not([data-active]) .crystal__orbit {
+    animation-play-state: paused;
+  }
+}
+
+/* Started apart, so the glints travel along the bar rather than flashing on all four at once. */
+.nav-strip .crystal:nth-of-type(2) .crystal__orbit { animation-delay: -1.75s; }
+.nav-strip .crystal:nth-of-type(3) .crystal__orbit { animation-delay: -3.5s; }
+.nav-strip .crystal:nth-of-type(4) .crystal__orbit { animation-delay: -5.25s; }
 
 /* ---- Sign-in --------------------------------------------------------------------------------- */
 

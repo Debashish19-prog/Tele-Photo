@@ -61,13 +61,17 @@ void main() {
   fragColor = vec4(light * mix(vec3(1.0), TINT, 0.7) + fresnel * 0.3, 1.0);
 }`;
 
-export interface Metal {
+/** Twice the 180px square the ring turns in, which keeps the metal sharp on a high-density screen. */
+const SIZE = 360;
+
+interface Renderer {
+  canvas: HTMLCanvasElement;
   draw: (time: number) => void;
-  destroy: () => void;
 }
 
-/** Returns null when WebGL2 is missing or the shader will not build, so the caller can use its fallback. */
-export function createMetal(canvas: HTMLCanvasElement): Metal | null {
+function createRenderer(): Renderer | null {
+  const canvas = document.createElement('canvas');
+  canvas.width = canvas.height = SIZE;
   const gl = canvas.getContext('webgl2', { alpha: false, antialias: false, depth: false, stencil: false, powerPreference: 'low-power' });
   if (!gl) return null;
 
@@ -94,14 +98,40 @@ export function createMetal(canvas: HTMLCanvasElement): Metal | null {
   }
 
   gl.useProgram(program);
-  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.viewport(0, 0, SIZE, SIZE);
   const time = gl.getUniformLocation(program, 'time');
+  // The next draw builds a new one. Until then, every ring keeps the last frame it copied.
+  canvas.addEventListener('webglcontextlost', () => {
+    shared = undefined;
+  });
 
   return {
+    canvas,
     draw: (now) => {
       gl.uniform1f(time, now);
       gl.drawArrays(gl.TRIANGLES, 0, 3);
     },
-    destroy: () => gl.deleteProgram(program),
+  };
+}
+
+/** One WebGL context for every ring on screen. Each context is costly, and browsers cap how many a page may hold. */
+let shared: Renderer | null | undefined;
+const renderer = () => (shared === undefined ? (shared = createRenderer()) : shared);
+
+export type DrawMetal = (time: number) => void;
+
+/** Returns null when WebGL2 is missing or the shader will not build, so the caller can use its fallback. */
+export function createMetal(canvas: HTMLCanvasElement): DrawMetal | null {
+  // In this order, because an opaque 2D canvas is black from the moment it exists, which would hide the fallback.
+  if (!renderer()) return null;
+  const target = canvas.getContext('2d', { alpha: false });
+  if (!target) return null;
+  canvas.width = canvas.height = SIZE;
+
+  return (time) => {
+    const source = renderer();
+    if (!source) return;
+    source.draw(time);
+    target.drawImage(source.canvas, 0, 0);
   };
 }

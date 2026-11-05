@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, Route, Switch, useLocation, useSearch } from 'wouter';
 import { type Account, api } from '@/api';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
-import { CrystalButton } from '@/components/CrystalButton';
+import { CrystalButton, CrystalLink } from '@/components/CrystalButton';
 import { DemoBadge } from '@/components/DemoBadge';
 import { LogoMark } from '@/components/Logo';
 import { StorageCheckDialog } from '@/components/StorageCheckDialog';
@@ -41,15 +41,17 @@ const MENU_GLASS = { frost: 1, blur: 6 } as const;
 const FILE_INPUT_ID = 'tp-file-input';
 export const openFilePicker = () => document.getElementById(FILE_INPUT_ID)?.click();
 
-/** On glass like its neighbours, because the header floats over photos of any brightness. */
+/** The wrapper holds the breakpoint, because a crystal sets its own display. */
 function Brand() {
   return (
-    <Link href="/" aria-label="Tele-Photo home" className="hidden flex-none rounded-full min-[720px]:block">
-      <LiquiGlass radius={24} frost={0.72} blur={1} refraction={60} bezel={16} elevated className="lq-round" contentClassName="flex h-12 items-center gap-2 pr-4 pl-2.5">
-        <LogoMark size={30} />
-        <span className="text-[16px] font-bold tracking-tight">Tele-Photo</span>
-      </LiquiGlass>
-    </Link>
+    <div className="hidden flex-none min-[720px]:flex">
+      <Link href="/" asChild>
+        <CrystalLink aria-label="Tele-Photo home" className="h-12 pr-5 pl-3">
+          <LogoMark size={24} />
+          <span className="text-[15px] font-bold tracking-tight">Tele-Photo</span>
+        </CrystalLink>
+      </Link>
+    </div>
   );
 }
 
@@ -270,6 +272,7 @@ function NavStrip() {
             onClick={() => {
               if (path !== href) navigate(href);
             }}
+            render={<CrystalButton />}
             className="min-w-0 cursor-pointer px-[clamp(2px,3.4vw,32px)]"
           >
             {label}
