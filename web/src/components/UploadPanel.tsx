@@ -1,11 +1,13 @@
 import { LiquiGlass } from '@liqui-design/glass';
 import { useQueryClient } from '@tanstack/react-query';
-import { Check, ChevronDown, ChevronUp, CloudUpload, Copy, RotateCw, TriangleAlert, X } from 'lucide-react';
+import { Check, ChevronDown, CloudUpload, Copy, RotateCw, TriangleAlert, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useMemo, useState } from 'react';
 import { api, type ServerUpload, type UploadStatus } from '@/api';
 import { Progress, ProgressTrack } from '@/components/ui/progress';
 import { useLocalUploads } from '@/hooks/useUploadStatus';
 import { formatBytes } from '@/lib/format';
+import { QUICK } from '@/lib/motion';
 import { type LocalUpload, uploader } from '@/lib/uploads';
 
 const MAX_ROWS = 60;
@@ -97,7 +99,7 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
   }, [local, server, status, queryClient]);
 
   const scanning = status?.scan.running ?? false;
-  if (rows.length === 0 && !scanning) return null;
+  const visible = rows.length > 0 || scanning;
 
   const active = rows.filter((r) => r.tone === 'active').length;
   const failed = rows.filter((r) => r.tone === 'error').length;
@@ -105,7 +107,7 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
   const sendingFromBrowser = local.some((e) => e.stage === 'sending' || e.stage === 'waiting');
 
   const title = scanning
-    ? `Restoring from Telegram · ${status!.scan.added.toLocaleString()} found`
+    ? `Restoring from Telegram · ${(status?.scan.added ?? 0).toLocaleString()} found`
     : active > 0
       ? `Uploading ${active.toLocaleString()} ${active === 1 ? 'photo' : 'photos'}`
       : failed > 0
@@ -113,8 +115,21 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
         : `${finished.toLocaleString()} ${finished === 1 ? 'photo' : 'photos'} done`;
 
   return (
-    <div className="fixed right-3 bottom-[88px] z-40 w-[min(380px,calc(100vw-1.5rem))] min-[720px]:right-5 min-[720px]:bottom-5">
-      <LiquiGlass radius={22} elevated frost={1} blur={6} refraction={70} bezel={20} className="lq-solid" contentClassName="flex flex-col">
+    <AnimatePresence>
+      {visible ? (
+    <motion.div
+      key="panel"
+      initial={{ opacity: 0, y: 24 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: 24, transition: QUICK }}
+      className="fixed right-3 bottom-[112px] z-40 w-[min(380px,calc(100vw-1.5rem))] min-[720px]:right-5 min-[1240px]:bottom-5"
+    >
+      {/*
+        Frost, not refraction: this panel changes height as it opens and closes, and a refracting
+        surface rebuilds its displacement map on every frame of that. At this much tint the
+        refraction was barely visible anyway.
+      */}
+      <LiquiGlass material="frost" radius={22} elevated frost={1} blur={6} className="lq-solid" contentClassName="flex flex-col">
         <div className="flex items-center gap-2 px-4 py-3" aria-live="polite">
           {failed > 0 && active === 0 ? (
             <TriangleAlert className="size-[18px] flex-none text-[var(--lq-danger)]" aria-hidden="true" />
@@ -125,7 +140,9 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
           )}
           <h2 className="min-w-0 flex-1 truncate text-[13.5px] font-semibold">{title}</h2>
           <button type="button" aria-label={collapsed ? 'Show uploads' : 'Hide uploads'} className="grid size-7 cursor-pointer place-items-center rounded-full hover:bg-[var(--lq-highlight)]" onClick={() => setCollapsed((c) => !c)}>
-            {collapsed ? <ChevronUp className="size-4" aria-hidden="true" /> : <ChevronDown className="size-4" aria-hidden="true" />}
+            <motion.span className="block" initial={false} animate={{ rotate: collapsed ? 180 : 0 }}>
+              <ChevronDown className="size-4" aria-hidden="true" />
+            </motion.span>
           </button>
           {active === 0 && failed === 0 && !scanning ? (
             <button
@@ -138,8 +155,9 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
             </button>
           ) : null}
         </div>
+        <AnimatePresence initial={false}>
         {collapsed ? null : (
-          <>
+          <motion.div key="list" className="overflow-hidden" initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0, transition: { duration: 0.2, ease: [0.2, 0.8, 0.3, 1] } }}>
             <ul className="max-h-[38vh] overflow-y-auto border-t border-[var(--app-line)]">
               {rows.slice(0, MAX_ROWS).map((row) => (
                 <li key={row.key} className="flex items-center gap-3 px-4 py-2.5">
@@ -180,9 +198,12 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
                 Keep this tab open until each file has reached the server. After that, the server finishes the job on its own.
               </p>
             ) : null}
-          </>
+          </motion.div>
         )}
+        </AnimatePresence>
       </LiquiGlass>
-    </div>
+    </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }

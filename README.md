@@ -96,7 +96,7 @@ These were taken in demo mode with stock sample photos from [Lorem Picsum](https
 ### Signing in
 
 <table>
-<tr><td width="50%" valign="top"><a href="docs/screenshots/sign-in.webp"><img src="docs/screenshots/sign-in.webp" alt="Sign-in card over a colourful mosaic"></a><br>Sign in with your Telegram phone number.</td><td width="50%" valign="top"><a href="docs/screenshots/sign-in-wrong-code.webp"><img src="docs/screenshots/sign-in-wrong-code.webp" alt="Sign-in card showing a code error"></a><br>A wrong code gets a clear message, and you can try again.</td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/sign-in.webp"><img src="docs/screenshots/sign-in.webp" alt="Glass sign-in card over a photo of snowy mountains"></a><br>Sign in with your Telegram phone number.</td><td width="50%" valign="top"><a href="docs/screenshots/sign-in-wrong-code.webp"><img src="docs/screenshots/sign-in-wrong-code.webp" alt="Sign-in card showing a code error"></a><br>A wrong code gets a clear message, and you can try again.</td></tr>
 <tr><td width="50%" valign="top"><a href="docs/screenshots/setup-needed.webp"><img src="docs/screenshots/setup-needed.webp" alt="Setup instructions on the sign-in card"></a><br>Shown until your API key is in <code>.env</code>.</td><td width="50%" valign="top"><a href="docs/screenshots/empty-library.webp"><img src="docs/screenshots/empty-library.webp" alt="Empty library with an upload button"></a><br>A new library, ready for its first photos.</td></tr>
 </table>
 
@@ -171,4 +171,6 @@ To try the app without a Telegram account, set `TP_STORAGE=fake` in `.env`. Any 
 | `web/src/components/` | The interface |
 | `web/src/components/ui/` | [Liqui UI](https://liqui.design) components, installed as source |
 
-The stack is Fastify, SQLite and [GramJS](https://github.com/gram-js/gramjs) on the server, and React, Tailwind and Liqui UI in the browser.
+The stack is Fastify, SQLite and [GramJS](https://github.com/gram-js/gramjs) on the server, and React, Tailwind, Liqui UI and [Motion](https://motion.dev) in the browser.
+
+The photo on the sign-in screen and behind the app is [Rogers Peak in Winter](https://commons.wikimedia.org/wiki/File:Rogers_Peak_in_Winter_(de4cdfd1-f792-4696-84d1-c911d2b4f2e9).JPG) by the US National Park Service, which is in the public domain. It is colour-graded for this app.

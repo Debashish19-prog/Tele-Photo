@@ -1,49 +1,97 @@
 import { LiquiGlass } from '@liqui-design/glass';
-import { ArrowLeft, ExternalLink, Lock, Send } from 'lucide-react';
-import { type FormEvent, useMemo, useState } from 'react';
+import { ChevronLeft, ExternalLink, Lock } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
+import { type FormEvent, type InputHTMLAttributes, type ReactNode, useState } from 'react';
 import { ApiError, api } from '@/api';
+import peaks from '@/assets/sign-in-peaks.webp';
 import { DemoBadge } from '@/components/DemoBadge';
-import { LogoMark } from '@/components/Logo';
+import { LogoGlyph } from '@/components/Logo';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-
-const SWATCHES = [
-  ['#f6a26b', '#d9506a'], ['#7fd1e8', '#3478c9'], ['#ffd76a', '#f08a3c'], ['#9ad98b', '#2f8f6b'], ['#c39bf2', '#6a4fd0'],
-  ['#ff9eb0', '#c23f7c'], ['#8bb7f0', '#26408f'], ['#f2e3c0', '#b98a5a'], ['#7fe0c3', '#1c8796'], ['#2f3a57', '#10131f'],
-  ['#ffb88a', '#7a3fb8'], ['#b6e36f', '#3b8a3f'], ['#e8eef5', '#9fb2c8'], ['#ff7e6b', '#7a1f3d'],
-];
-
-function Mosaic() {
-  const tiles = useMemo(
-    () =>
-      Array.from({ length: 96 }, (_, i) => {
-        const swatch = SWATCHES[(i * 7 + (i % 5)) % SWATCHES.length]!;
-        return {
-          background: `linear-gradient(${(i * 47) % 360}deg, ${swatch[0]}, ${swatch[1]})`,
-          gridColumn: i % 11 === 0 ? 'span 2' : undefined,
-          gridRow: i % 17 === 0 ? 'span 2' : undefined,
-        };
-      }),
-    [],
-  );
-  return (
-    <div aria-hidden="true" className="fixed inset-0 overflow-hidden bg-[#0e1016]">
-      <div className="mosaic">
-        {tiles.map((style, i) => (
-          <i key={i} style={style} />
-        ))}
-      </div>
-    </div>
-  );
-}
+import { FLIGHT, QUICK } from '@/lib/motion';
+import { cn } from '@/lib/utils';
 
 type Step =
   | { name: 'phone' }
   | { name: 'code'; loginId: string; phone: string; delivery: 'app' | 'other' }
   | { name: 'password'; loginId: string; hint: string };
 
-const CARD_GLASS = { radius: 30, elevated: true, frost: 1, blur: 8, refraction: 90, bezel: 26 } as const;
-const FIELD_GLASS = { radius: 14, frost: 0.6 } as const;
+const STEP = {
+  initial: { opacity: 0, x: 18 },
+  animate: { opacity: 1, x: 0 },
+  exit: { opacity: 0, x: -18 },
+  transition: QUICK,
+};
+
+/**
+ * Movement only, with no fade. Anything below 1 opacity on an ancestor cuts the glass off from the
+ * photo behind it, so a fade would show a flat tint and then pop into refraction as it finished.
+ */
+const RISE = { initial: { y: 22, scale: 0.975 }, animate: { y: 0, scale: 1 }, transition: FLIGHT };
+
+const CARD_GLASS = { radius: 84, elevated: true, frost: 0.34, blur: 2, refraction: 190, bezel: 42, specular: 1, saturation: 1.3 } as const;
+const PILL_GLASS = { radius: 36, frost: 0.28, blur: 2, refraction: 90, bezel: 22, specular: 1, saturation: 1.2 } as const;
+
+/** The photo fades in over a matching gradient, so a slow connection never shows a blank page. */
+function Wallpaper() {
+  const [loaded, setLoaded] = useState(false);
+  return (
+    <div aria-hidden="true" className="login-wallpaper">
+      <img src={peaks} alt="" decoding="async" data-loaded={loaded} onLoad={() => setLoaded(true)} />
+    </div>
+  );
+}
+
+interface GlassCardProps {
+  id: string;
+  /** The two halves of the small line at the top of the card. */
+  eyebrow: [string, string];
+  title: ReactNode;
+  onBack?: () => void;
+  /** How far through sign-in this is, as dots. A setup message has no such thing. */
+  progress?: { at: number; of: number };
+  children: ReactNode;
+}
+
+function GlassCard({ id, eyebrow, title, onBack, progress, children }: GlassCardProps) {
+  return (
+    <motion.div className="w-full" {...RISE}>
+      <LiquiGlass {...CARD_GLASS} className="w-full" contentClassName="login-card">
+        <p className="login-eyebrow">
+          {eyebrow[0]}: <span>{eyebrow[1]}</span>
+        </p>
+
+        <div className="relative my-[clamp(10px,3vh,30px)] flex w-full justify-center">
+          {onBack ? (
+            <button type="button" onClick={onBack} aria-label="Change phone number" className="login-back">
+              <ChevronLeft className="size-[18px]" aria-hidden="true" />
+            </button>
+          ) : null}
+          <span className="login-disc">
+            <LogoGlyph />
+            <span className="login-badge">
+              <Lock className="size-[13px]" strokeWidth={2.75} aria-hidden="true" />
+            </span>
+          </span>
+        </div>
+
+        <AnimatePresence mode="wait" initial={false}>
+          <motion.div key={id} {...STEP} className="flex w-full flex-col items-center">
+            <h1 className="login-title">{title}</h1>
+            <div className="login-copy">{children}</div>
+          </motion.div>
+        </AnimatePresence>
+
+        {progress ? (
+          <div role="img" aria-label={`Step ${progress.at + 1} of ${progress.of}`} className="login-dots">
+            {Array.from({ length: progress.of }, (_, i) => (
+              <i key={i} data-active={i === progress.at} />
+            ))}
+          </div>
+        ) : null}
+      </LiquiGlass>
+    </motion.div>
+  );
+}
 
 interface LoginScreenProps {
   storage: 'telegram' | 'fake';
@@ -98,127 +146,170 @@ export function LoginScreen({ storage, configured, reason, onSignedIn }: LoginSc
       onSignedIn();
     }, event);
 
+  // Telegram only reveals a two-step password once the code is in, so that dot appears when it does.
+  const view =
+    step.name === 'phone'
+      ? {
+          title: (
+            <>
+              Your photos,
+              <br />
+              your Telegram
+            </>
+          ),
+          progress: { at: 0, of: 2 },
+          label: 'Enter your Telegram phone number to get a sign-in code.',
+          note: null,
+          submit: submitPhone,
+          action: busy ? 'Sending…' : 'Send code',
+          field: {
+            value: phone,
+            onChange: (e) => setPhone(e.target.value),
+            placeholder: '+1 555 123 4567',
+            type: 'tel',
+            autoComplete: 'tel',
+            // Spaces alone would pass `required`, and the server can do nothing with them.
+            pattern: '.*\\d.*',
+            title: 'Your phone number, with its country code',
+          } satisfies InputHTMLAttributes<HTMLInputElement>,
+        }
+      : step.name === 'code'
+        ? {
+            title: (
+              <>
+                Check your
+                <br />
+                Telegram
+              </>
+            ),
+            progress: { at: 1, of: 2 },
+            label: `Enter the code Telegram sent ${step.delivery === 'app' ? 'to your app' : 'you'} for ${step.phone}.`,
+            note: null,
+            submit: submitCode,
+            action: busy ? 'Checking…' : 'Continue',
+            field: {
+              value: code,
+              onChange: (e) => setCode(e.target.value.replace(/\D/g, '')),
+              placeholder: 'Code',
+              inputMode: 'numeric',
+              autoComplete: 'one-time-code',
+              className: 'font-semibold tracking-[0.3em] placeholder:font-medium placeholder:tracking-normal',
+            } satisfies InputHTMLAttributes<HTMLInputElement>,
+          }
+        : {
+            title: (
+              <>
+                One more
+                <br />
+                step
+              </>
+            ),
+            progress: { at: 2, of: 3 },
+            label: 'Enter your two-step verification password.',
+            note: step.hint ? `Hint: ${step.hint}` : null,
+            submit: submitPassword,
+            action: busy ? 'Checking…' : 'Sign in',
+            field: {
+              value: password,
+              onChange: (e) => setPassword(e.target.value),
+              placeholder: 'Password',
+              type: 'password',
+              autoComplete: 'current-password',
+            } satisfies InputHTMLAttributes<HTMLInputElement>,
+          };
+
   return (
-    <>
-      <Mosaic />
-      <main className="relative grid min-h-dvh place-items-center p-4">
-        <div className="flex w-full max-w-[420px] flex-col items-center gap-3">
+    <div className="login">
+      <Wallpaper />
+      <div className="relative flex min-h-dvh flex-col">
+        <header className="flex flex-wrap items-center justify-between gap-2 px-5 pt-4 sm:px-9 sm:pt-7">
+          <span className="login-wordmark">Tele-Photo</span>
           {storage === 'fake' ? <DemoBadge /> : null}
-          <LiquiGlass {...CARD_GLASS} className="w-full" contentClassName="p-7">
-            <div className="mb-6 flex items-center gap-3">
-              <LogoMark size={38} />
-              <div>
-                <h1 className="text-xl font-bold tracking-tight">Tele-Photo</h1>
-                <p className="text-[13px]">Your photos, in your own Telegram</p>
-              </div>
-            </div>
+        </header>
 
-            {reason ? <p className="mb-4 rounded-xl bg-amber-400/20 px-3 py-2 text-[13px] font-medium">{reason}</p> : null}
+        <main className="grid flex-1 grid-cols-[minmax(0,1fr)] place-items-center px-4 py-4">
+          {configured ? (
+            <form onSubmit={view.submit} className="login-stack">
+              {reason ? <p className="login-reason">{reason}</p> : null}
 
-            {!configured ? (
+              <GlassCard
+                id={step.name}
+                eyebrow={['Sign in', 'Telegram']}
+                title={view.title}
+                progress={view.progress}
+                onBack={
+                  step.name === 'code'
+                    ? () => {
+                        setStep({ name: 'phone' });
+                        setCode('');
+                        setError(null);
+                      }
+                    : undefined
+                }
+              >
+                <label htmlFor="tp-sign-in">{view.label}</label>
+                {view.note ? <p className="mt-1 opacity-85">{view.note}</p> : null}
+              </GlassCard>
+
+              <motion.div className="mt-[clamp(10px,1.6vh,16px)] w-full" {...RISE}>
+                {/* The focus ring is on the pill, as a ring on the field would be a box inside a capsule. */}
+                <LiquiGlass {...PILL_GLASS} className="login-pill lq-round" contentClassName="flex items-center gap-2 p-[7px]">
+                  <input
+                    {...view.field}
+                    // A new element per step, so the browser never offers one step's autofill for another.
+                    key={step.name}
+                    id="tp-sign-in"
+                    autoFocus
+                    required
+                    className={cn('login-input', view.field.className)}
+                  />
+                  <Button type="submit" variant="accent" disabled={busy} glass={{ radius: 29 }} className="login-go lq-round">
+                    {view.action}
+                  </Button>
+                </LiquiGlass>
+              </motion.div>
+
+              {error ? (
+                <motion.p key={error} role="alert" initial={{ opacity: 0, y: -4 }} animate={{ opacity: 1, y: 0 }} transition={QUICK} className="login-error">
+                  {error}
+                </motion.p>
+              ) : null}
+            </form>
+          ) : (
+            <div className="login-stack">
               <SetupNeeded />
-            ) : step.name === 'phone' ? (
-              <form onSubmit={submitPhone} className="flex flex-col gap-3">
-                <label htmlFor="tp-phone" className="text-[13px] font-semibold">
-                  Your Telegram phone number
-                </label>
-                <Input
-                  id="tp-phone"
-                  glass={FIELD_GLASS}
-                  value={phone}
-                  onChange={(e) => setPhone(e.target.value)}
-                  placeholder="+1 555 123 4567"
-                  type="tel"
-                  autoComplete="tel"
-                  autoFocus
-                  required
-                  inputClassName="py-3 text-[15px]"
-                />
-                <Button type="submit" variant="accent" disabled={busy || !phone.trim()} className="mt-1 w-full justify-center py-2.5">
-                  <Send className="size-4" aria-hidden="true" />
-                  {busy ? 'Sending code…' : 'Send sign-in code'}
-                </Button>
-                <p className="mt-1 text-[12.5px] leading-snug">
-                  Originals are kept at full quality in a private channel on your account. Thumbnails and search stay on this server.
-                </p>
-              </form>
-            ) : step.name === 'code' ? (
-              <form onSubmit={submitCode} className="flex flex-col gap-3">
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStep({ name: 'phone' });
-                    setCode('');
-                    setError(null);
-                  }}
-                  className="flex w-fit items-center gap-1 text-[13px] font-medium text-[var(--lq-text-dim)] hover:text-[var(--lq-text)]"
-                >
-                  <ArrowLeft className="size-3.5" aria-hidden="true" /> {step.phone}
-                </button>
-                <label htmlFor="tp-code" className="text-[13px] font-semibold">
-                  {step.delivery === 'app' ? 'Enter the code Telegram sent to your app' : 'Enter the code Telegram sent you'}
-                </label>
-                <Input
-                  id="tp-code"
-                  glass={FIELD_GLASS}
-                  value={code}
-                  onChange={(e) => setCode(e.target.value.replace(/\D/g, ''))}
-                  inputMode="numeric"
-                  autoComplete="one-time-code"
-                  autoFocus
-                  required
-                  inputClassName="py-3 text-center text-xl font-semibold tracking-[0.4em]"
-                />
-                <Button type="submit" variant="accent" disabled={busy || !code} className="mt-1 w-full justify-center py-2.5">
-                  {busy ? 'Checking…' : 'Continue'}
-                </Button>
-              </form>
-            ) : (
-              <form onSubmit={submitPassword} className="flex flex-col gap-3">
-                <label htmlFor="tp-password" className="flex items-center gap-1.5 text-[13px] font-semibold">
-                  <Lock className="size-3.5" aria-hidden="true" /> Your two-step verification password
-                </label>
-                <Input
-                  id="tp-password"
-                  glass={FIELD_GLASS}
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  type="password"
-                  autoComplete="current-password"
-                  autoFocus
-                  required
-                  inputClassName="py-3 text-[15px]"
-                />
-                {step.hint ? <p className="text-[12.5px] text-[var(--lq-text-dim)]">Hint: {step.hint}</p> : null}
-                <Button type="submit" variant="accent" disabled={busy || !password} className="mt-1 w-full justify-center py-2.5">
-                  {busy ? 'Checking…' : 'Sign in'}
-                </Button>
-              </form>
-            )}
+            </div>
+          )}
+        </main>
 
-            {error ? (
-              <p role="alert" className="mt-3 text-[13px] font-medium text-[var(--lq-danger-text)]">
-                {error}
-              </p>
-            ) : null}
-          </LiquiGlass>
-        </div>
-      </main>
-    </>
+        <footer className="login-footnote">
+          Originals are kept at full quality in a private channel on your account. Thumbnails and search stay on this server.
+        </footer>
+      </div>
+    </div>
   );
 }
 
 function SetupNeeded() {
   return (
-    <div className="flex flex-col gap-3 text-[13.5px] leading-relaxed">
-      <p className="font-semibold">One setup step before you can sign in</p>
-      <ol className="flex list-decimal flex-col gap-1.5 pl-5">
+    <GlassCard
+      id="setup"
+      eyebrow={['Setup', 'Needed']}
+      title={
+        <>
+          Almost
+          <br />
+          ready
+        </>
+      }
+    >
+      <ol className="flex list-decimal flex-col gap-1.5 pl-5 text-left text-[13.5px] leading-snug">
         <li>
-          Go to{' '}
-          <a className="inline-flex items-center gap-0.5 font-semibold text-[var(--lq-accent)] underline" href="https://my.telegram.org/apps" target="_blank" rel="noreferrer">
+          Create an app at{' '}
+          <a className="inline-flex items-center gap-0.5 font-semibold underline" href="https://my.telegram.org/apps" target="_blank" rel="noreferrer">
             my.telegram.org/apps <ExternalLink className="size-3" aria-hidden="true" />
-          </a>{' '}
-          and create an app.
+          </a>
+          .
         </li>
         <li>
           Copy <code className="font-mono text-[12px]">.env.example</code> to <code className="font-mono text-[12px]">.env</code> and fill in{' '}
@@ -226,6 +317,6 @@ function SetupNeeded() {
         </li>
         <li>Restart the server, then reload this page.</li>
       </ol>
-    </div>
+    </GlassCard>
   );
 }

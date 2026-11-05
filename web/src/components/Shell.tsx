@@ -1,14 +1,15 @@
 import { LiquiGlass } from '@liqui-design/glass';
 import { useQueryClient } from '@tanstack/react-query';
-import { CloudUpload, Images, Library, LogOut, Moon, RefreshCw, Search, Star, Sun, SunMoon, Trash2, Unplug, Upload, X } from 'lucide-react';
+import { LogOut, Moon, RefreshCw, Search, Sun, SunMoon, Unplug, Upload, X } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, Route, Switch, useLocation, useSearch } from 'wouter';
-import { type Account, api, type UploadStatus } from '@/api';
+import { type Account, api } from '@/api';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
+import { CrystalButton } from '@/components/CrystalButton';
 import { DemoBadge } from '@/components/DemoBadge';
 import { LogoMark } from '@/components/Logo';
 import { UploadPanel } from '@/components/UploadPanel';
-import { Avatar, AvatarFallback } from '@/components/ui/avatar';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { Menu, MenuContent, MenuGroup, MenuGroupLabel, MenuItem, MenuRadioGroup, MenuRadioItem, MenuSeparator, MenuTrigger } from '@/components/ui/menu';
@@ -16,15 +17,16 @@ import { TabBar, TabBarItem } from '@/components/ui/tab-bar';
 import { Toaster, useToast } from '@/components/ui/toast';
 import { setTheme, type ThemeChoice, useTheme } from '@/hooks/useTheme';
 import { useUploadStatus } from '@/hooks/useUploadStatus';
-import { formatBytes, formatCount } from '@/lib/format';
+import { formatCount } from '@/lib/format';
+import { QUICK } from '@/lib/motion';
 import { filesFromDrop, uploader } from '@/lib/uploads';
 import { AlbumPage, AlbumsPage, FavoritesPage, PhotosPage, SearchPage, TrashPage } from '@/pages/Pages';
 
 const NAV = [
-  { href: '/', label: 'Photos', icon: Images },
-  { href: '/favorites', label: 'Favorites', icon: Star },
-  { href: '/albums', label: 'Albums', icon: Library },
-  { href: '/trash', label: 'Trash', icon: Trash2 },
+  { href: '/', label: 'Photos' },
+  { href: '/favorites', label: 'Favorites' },
+  { href: '/albums', label: 'Albums' },
+  { href: '/trash', label: 'Trash' },
 ] as const;
 
 function activeSection(path: string): string {
@@ -38,48 +40,15 @@ const MENU_GLASS = { frost: 1, blur: 6 } as const;
 const FILE_INPUT_ID = 'tp-file-input';
 export const openFilePicker = () => document.getElementById(FILE_INPUT_ID)?.click();
 
-function Sidebar({ stats }: { stats: UploadStatus['stats'] | undefined }) {
-  const [path] = useLocation();
-  const active = activeSection(path);
+/** On glass like its neighbours, because the header floats over photos of any brightness. */
+function Brand() {
   return (
-    <aside className="fixed top-3 bottom-3 left-3 z-30 hidden w-[calc(var(--sidebar-w)-1.5rem)] min-[720px]:block">
-      <LiquiGlass radius={28} blur={1} frost={0.62} refraction={80} bezel={24} elevated className="h-full" contentClassName="flex h-full flex-col p-3">
-        <Link href="/" aria-label="Tele-Photo home" className="mb-4 flex items-center gap-2.5 rounded-xl px-1.5 py-1.5 max-[1179px]:justify-center">
-          <LogoMark size={32} />
-          <span className="text-[17px] font-bold tracking-tight max-[1179px]:hidden">Tele-Photo</span>
-        </Link>
-        <nav aria-label="Main" className="flex flex-col gap-1">
-          {NAV.map(({ href, label, icon: Icon }) => {
-            const current = active === href;
-            return (
-              <Link
-                key={href}
-                href={href}
-                aria-current={current ? 'page' : undefined}
-                title={label}
-                className={`flex items-center gap-3 rounded-[14px] px-3 py-2.5 text-[14px] font-medium transition-colors max-[1179px]:justify-center ${
-                  current ? 'bg-[color-mix(in_srgb,var(--lq-accent)_17%,transparent)] font-semibold text-[var(--lq-accent)]' : 'hover:bg-[var(--lq-highlight)]'
-                }`}
-              >
-                <Icon className={`size-[19px] flex-none ${current && href === '/favorites' ? 'fill-current' : ''}`} aria-hidden="true" />
-                <span className="max-[1179px]:hidden">{label}</span>
-              </Link>
-            );
-          })}
-        </nav>
-        <span className="flex-1" />
-        {stats ? (
-          <div className="rounded-[14px] px-3 py-2.5 text-[12.5px] leading-snug max-[1179px]:hidden">
-            <div className="flex items-center gap-1.5 font-semibold">
-              <CloudUpload className="size-3.5 flex-none text-[var(--lq-accent)]" aria-hidden="true" /> In your Telegram
-            </div>
-            <div className="mt-1 text-[var(--lq-text-dim)]">
-              {formatCount(stats.count, 'photo')} · {formatBytes(stats.bytes)}
-            </div>
-          </div>
-        ) : null}
+    <Link href="/" aria-label="Tele-Photo home" className="hidden flex-none rounded-full min-[720px]:block">
+      <LiquiGlass radius={24} frost={0.72} blur={1} refraction={60} bezel={16} elevated className="lq-round" contentClassName="flex h-12 items-center gap-2 pr-4 pl-2.5">
+        <LogoMark size={30} />
+        <span className="text-[16px] font-bold tracking-tight">Tele-Photo</span>
       </LiquiGlass>
-    </aside>
+    </Link>
   );
 }
 
@@ -142,11 +111,14 @@ function UserMenu({ account, onSignedOut }: { account: Account; onSignedOut: () 
   return (
     <>
       <Menu>
-        <MenuTrigger aria-label={`Account: ${name}`} className="flex-none cursor-pointer rounded-full">
-          <Avatar size={48} className="lq-round">
-            <AvatarFallback className="text-[15px] font-semibold">{initial}</AvatarFallback>
-          </Avatar>
-        </MenuTrigger>
+        <MenuTrigger
+          aria-label={`Account: ${name}`}
+          render={
+            <CrystalButton className="size-12 flex-none">
+              <span className="text-[15px]">{initial}</span>
+            </CrystalButton>
+          }
+        />
         <MenuContent align="end" className="lq-solid w-64" glass={MENU_GLASS}>
           <div className="px-2.5 pt-1.5 pb-2">
             <p className="truncate text-[13.5px] font-semibold">{name}</p>
@@ -241,26 +213,62 @@ function DropOverlay({ onFiles }: { onFiles: (files: File[]) => void }) {
     };
   }, [onFiles]);
 
-  if (!dragging) return null;
   return (
-    <div className="pointer-events-none fixed inset-0 z-[60] grid place-items-center bg-[var(--lq-scrim)] p-6">
-      <LiquiGlass radius={32} elevated frost={0.7} blur={2} refraction={110} bezel={30} contentClassName="flex flex-col items-center gap-3 px-14 py-11 text-center">
-        <Upload className="size-10 text-[var(--lq-accent)]" aria-hidden="true" />
-        <p className="text-lg font-semibold">Drop to upload</p>
-        <p className="text-[13px] text-[var(--lq-text-dim)]">Photos and whole folders, up to 1.95 GB each</p>
-      </LiquiGlass>
-    </div>
+    <AnimatePresence>
+      {dragging ? (
+        <motion.div
+          key="drop"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          exit={{ opacity: 0 }}
+          transition={QUICK}
+          className="pointer-events-none fixed inset-0 z-[60] grid place-items-center bg-[var(--lq-scrim)] p-6"
+        >
+          <motion.div initial={{ scale: 0.94 }} animate={{ scale: 1 }}>
+            <LiquiGlass radius={32} elevated frost={0.7} blur={2} refraction={110} bezel={30} contentClassName="flex flex-col items-center gap-3 px-14 py-11 text-center">
+              <Upload className="size-10 text-[var(--lq-accent)]" aria-hidden="true" />
+              <p className="text-lg font-semibold">Drop to upload</p>
+              <p className="text-[13px] text-[var(--lq-text-dim)]">Photos and whole folders, up to 1.95 GB each</p>
+            </LiquiGlass>
+          </motion.div>
+        </motion.div>
+      ) : null}
+    </AnimatePresence>
   );
 }
 
-function MobileTabs() {
-  const [path, navigate] = useLocation();
+/** Clear glass, so the page reaches the ripple. Its tint and rim are in index.css. */
+const NAV_GLASS = { frost: 0, blur: 1, refraction: 70, bezel: 14, specular: 1 } as const;
+
+/** What gives the bar its rippled view of the page. index.css applies it to the glass's backdrop. */
+function NavRipple() {
   return (
-    <div className="mobile-tabs fixed inset-x-3 bottom-3 z-30 min-[720px]:hidden">
-      {/* The stock frost is nearly clear, which leaves dark labels unreadable over a dark photo. */}
-      <TabBar className="lq-round w-full" value={activeSection(path) || '/'} onValueChange={(value: string) => navigate(value)} aria-label="Main" glass={{ frost: 0.85, blur: 2 }}>
-        {NAV.map(({ href, label, icon: Icon }) => (
-          <TabBarItem key={href} value={href} icon={<Icon className="size-[22px]" aria-hidden="true" />}>
+    <svg aria-hidden="true" width="0" height="0" className="absolute">
+      <filter id="nav-ripple" x="0" y="0" width="100%" height="100%" colorInterpolationFilters="sRGB">
+        <feTurbulence type="fractalNoise" baseFrequency="0.045 0.016" numOctaves={1} seed={7} result="noise" />
+        <feDisplacementMap in="SourceGraphic" in2="noise" scale={34} xChannelSelector="R" yChannelSelector="G" />
+      </filter>
+    </svg>
+  );
+}
+
+function NavStrip() {
+  const [path, navigate] = useLocation();
+  const active = activeSection(path) || '/';
+  return (
+    <div className="nav-strip pointer-events-none fixed inset-x-3 bottom-3 z-30 flex justify-center min-[720px]:bottom-5">
+      <NavRipple />
+      <TabBar className="lq-round pointer-events-auto" value={active} aria-label="Main" glass={NAV_GLASS}>
+        {NAV.map(({ href, label }) => (
+          <TabBarItem
+            key={href}
+            value={href}
+            // On the click, not on a change of tab: inside an album or a search, the current tab still has to lead back to its own page.
+            onClick={() => {
+              if (path !== href) navigate(href);
+            }}
+            className="min-w-0 cursor-pointer px-[clamp(2px,3.4vw,32px)]"
+          >
             {label}
           </TabBarItem>
         ))}
@@ -314,16 +322,16 @@ export function Shell({ account, storage, onReauth }: ShellProps) {
           event.target.value = '';
         }}
       />
-      <Sidebar stats={status?.stats} />
-      <header className="fixed top-3 right-3 left-3 z-20 flex items-center gap-2.5 min-[720px]:right-5 min-[720px]:left-[calc(var(--sidebar-w)+0.25rem)]">
+      <header className="fixed top-3 right-3 left-3 z-20 flex items-center gap-2.5 min-[720px]:right-5 min-[720px]:left-5">
+        <Brand />
         <SearchBox />
-        <Button variant="accent" onClick={openFilePicker} aria-label="Upload photos" glass={{ radius: 24 }} className="h-12 flex-none px-5 max-[519px]:w-12 max-[519px]:px-0">
+        <CrystalButton onClick={openFilePicker} aria-label="Upload photos" className="h-12 flex-none px-[22px] max-[519px]:w-12 max-[519px]:px-0">
           <Upload className="size-4" aria-hidden="true" />
           <span className="max-[519px]:hidden">Upload</span>
-        </Button>
+        </CrystalButton>
         <UserMenu account={account} onSignedOut={signedOut} />
       </header>
-      <main className="pt-[var(--top-h)] pr-3 pb-28 pl-3 min-[720px]:pr-[60px] min-[720px]:pb-10 min-[720px]:pl-[calc(var(--sidebar-w)+0.25rem)]">
+      <main className="pt-[var(--top-h)] pr-3 pb-32 pl-3 min-[720px]:pr-[60px] min-[720px]:pl-5">
         {storage === 'fake' ? (
           <div className="mb-1">
             <DemoBadge />
@@ -337,6 +345,11 @@ export function Shell({ account, storage, onReauth }: ShellProps) {
             </Button>
           </div>
         ) : null}
+        {/*
+          Opacity only. A transform here, even briefly, would make this the frame of reference for
+          every position: fixed element inside the pages.
+        */}
+        <motion.div key={path} initial={{ opacity: 0 }} animate={{ opacity: 1 }} transition={{ duration: 0.18 }}>
         <Switch>
           <Route path="/" component={PhotosPage} />
           <Route path="/search" component={SearchPage} />
@@ -353,11 +366,12 @@ export function Shell({ account, storage, onReauth }: ShellProps) {
             </div>
           </Route>
         </Switch>
+        </motion.div>
       </main>
-      <MobileTabs />
+      <NavStrip />
       <UploadPanel status={status} />
       <DropOverlay onFiles={addFiles} />
-      <Toaster className="lq-solid max-[719px]:bottom-[88px] sm:right-auto sm:left-[calc(var(--sidebar-w)+0.5rem)] max-sm:right-3 max-sm:left-3" />
+      <Toaster className="lq-solid max-[1240px]:bottom-[112px]! sm:right-auto sm:left-5 max-sm:right-3 max-sm:left-3" />
     </>
   );
 }

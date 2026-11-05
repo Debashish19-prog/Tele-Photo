@@ -1,10 +1,12 @@
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
+import { MotionConfig } from 'motion/react';
 import { StrictMode } from 'react';
 import { createRoot } from 'react-dom/client';
 import { App } from '@/App';
 import { ApiError } from '@/api';
 import { ToastProvider } from '@/components/ui/toast';
 import { TooltipProvider } from '@/components/ui/tooltip';
+import { SPRING } from '@/lib/motion';
 import '@/index.css';
 
 const queryClient = new QueryClient({
@@ -25,11 +27,14 @@ const queryClient = new QueryClient({
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <QueryClientProvider client={queryClient}>
-      <ToastProvider limit={3}>
-        <TooltipProvider delay={350}>
-          <App />
-        </TooltipProvider>
-      </ToastProvider>
+      {/* reducedMotion="user" follows the system setting for people who get ill from animation. */}
+      <MotionConfig reducedMotion="user" transition={SPRING}>
+        <ToastProvider limit={3}>
+          <TooltipProvider delay={350}>
+            <App />
+          </TooltipProvider>
+        </ToastProvider>
+      </MotionConfig>
     </QueryClientProvider>
   </StrictMode>,
 );

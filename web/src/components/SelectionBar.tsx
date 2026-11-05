@@ -1,8 +1,10 @@
 import { Download, FolderMinus, FolderPlus, ImageIcon, RotateCcw, Star, Trash2, X } from 'lucide-react';
+import { motion, useIsPresent } from 'motion/react';
 import { ToolbarIcon } from '@/components/IconAction';
 import { Button } from '@/components/ui/button';
 import { Toolbar, ToolbarGroup, ToolbarSeparator } from '@/components/ui/toolbar';
 import { formatCount } from '@/lib/format';
+import { QUICK } from '@/lib/motion';
 
 export interface SelectionHandlers {
   onClear: () => void;
@@ -22,8 +24,17 @@ export interface SelectionHandlers {
 /** Takes the place of the header while photos are selected, as the actions then all concern them. */
 export function SelectionBar({ count, handlers }: { count: number; handlers: SelectionHandlers }) {
   const h = handlers;
+  // Lets the header start returning as this leaves, rather than popping back once it has gone.
+  const leaving = !useIsPresent();
   return (
-    <div className="selection-bar fixed top-3 right-3 left-3 z-30 min-[720px]:right-5 min-[720px]:left-[calc(var(--sidebar-w)+0.25rem)]">
+    <motion.div
+      data-leaving={leaving}
+      initial={{ opacity: 0, y: -14 }}
+      animate={{ opacity: 1, y: 0 }}
+      exit={{ opacity: 0, y: -14, transition: QUICK }}
+      style={{ pointerEvents: leaving ? 'none' : undefined }}
+      className="selection-bar fixed top-3 right-3 left-3 z-30 min-[720px]:right-5 min-[720px]:left-5"
+    >
       <Toolbar aria-label="Actions for the selected photos" className="lq-round w-full" glass={{ frost: 0.8, radius: 26, blur: 1, elevated: true }}>
         <ToolbarGroup className="flex items-center">
           <ToolbarIcon label="Clear selection" icon={<X className="size-[18px]" aria-hidden="true" />} onClick={h.onClear} />
@@ -56,6 +67,6 @@ export function SelectionBar({ count, handlers }: { count: number; handlers: Sel
           </ToolbarGroup>
         )}
       </Toolbar>
-    </div>
+    </motion.div>
   );
 }

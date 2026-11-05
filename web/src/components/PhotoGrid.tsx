@@ -1,10 +1,12 @@
 import { Check, CheckCircle2, Circle, CloudUpload, FileImage, Star, TriangleAlert } from 'lucide-react';
+import { AnimatePresence, motion } from 'motion/react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { type PhotoItem, thumbUrl } from '@/api';
 import { Scrubber } from '@/components/Scrubber';
 import type { Selection } from '@/hooks/useSelection';
 import { extensionOf } from '@/lib/format';
 import { buildLayout, firstRowAt, type Layout, type Tile } from '@/lib/layout';
+import { QUICK } from '@/lib/motion';
 
 const GAP = 4;
 const HEADER_HEIGHT = 44;
@@ -24,11 +26,13 @@ interface TileViewProps {
   height: number;
   selected: boolean;
   selecting: boolean;
+  /** True while this photo is open in the viewer, so the grid does not show a second copy of it. */
+  hidden: boolean;
   onOpen: (id: number) => void;
   onToggle: (id: number, range: boolean) => void;
 }
 
-const TileView = memo(function TileView({ tile, height, selected, selecting, onOpen, onToggle }: TileViewProps) {
+const TileView = memo(function TileView({ tile, height, selected, selecting, hidden, onOpen, onToggle }: TileViewProps) {
   const { item, x, width } = tile;
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
 
@@ -37,7 +41,7 @@ const TileView = memo(function TileView({ tile, height, selected, selecting, onO
   };
 
   return (
-    <div className="tile" data-selected={selected} style={{ left: x, width, height }}>
+    <motion.div className="tile" data-selected={selected} data-photo-id={item.id} whileTap={{ scale: 0.985 }} style={{ left: x, width, height, visibility: hidden ? 'hidden' : undefined }}>
       {item.noPreview || item.previewComing ? (
         <div className={`grid size-full place-items-center p-2 text-center text-[var(--lq-text-dim)] ${item.previewComing ? 'shimmer' : ''}`}>
           <div className="flex flex-col items-center gap-1">
@@ -46,7 +50,15 @@ const TileView = memo(function TileView({ tile, height, selected, selecting, onO
           </div>
         </div>
       ) : (
-        <img src={thumbUrl(item.id)} alt={item.filename} loading="lazy" decoding="async" draggable={false} />
+        <motion.img
+          src={thumbUrl(item.id)}
+          alt={item.filename}
+          loading="lazy"
+          decoding="async"
+          draggable={false}
+          initial={false}
+          animate={{ scale: selected ? 0.86 : 1, borderRadius: selected ? 10 : 0 }}
+        />
       )}
       <div className="tile-scrim" />
       <button
@@ -93,16 +105,32 @@ const TileView = memo(function TileView({ tile, height, selected, selecting, onO
           onToggle(item.id, event.shiftKey);
         }}
       >
-        {selected ? (
-          <span className="grid size-[22px] place-items-center rounded-full bg-[var(--lq-accent)] text-white">
-            <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
-          </span>
-        ) : (
-          <Circle className="size-[22px] drop-shadow" aria-hidden="true" />
-        )}
+        <Circle className="size-[22px] drop-shadow" aria-hidden="true" />
+        {/* initial={false}: a row scrolling back into view should not replay this for its selected tiles. */}
+        <AnimatePresence initial={false}>
+          {selected ? (
+            <motion.span
+              key="on"
+              initial={{ scale: 0.3, opacity: 0 }}
+              animate={{ scale: 1, opacity: 1 }}
+              exit={{ scale: 0.3, opacity: 0, transition: QUICK }}
+              className="absolute grid size-[22px] place-items-center rounded-full bg-[var(--lq-accent)] text-white"
+            >
+              <Check className="size-3.5" strokeWidth={3} aria-hidden="true" />
+            </motion.span>
+          ) : null}
+        </AnimatePresence>
       </button>
       <div className="pointer-events-none absolute right-1.5 bottom-1.5 left-1.5 flex items-center justify-between">
-        {item.favorite ? <Star className={`size-4 drop-shadow ${selected ? 'fill-[var(--lq-accent)] text-[var(--lq-accent)]' : 'fill-white text-white'}`} aria-label="Favorite" /> : <span />}
+        <span className="block size-4">
+          <AnimatePresence initial={false}>
+            {item.favorite ? (
+              <motion.span key="star" className="block" initial={{ scale: 0.3, opacity: 0 }} animate={{ scale: 1, opacity: 1 }} exit={{ scale: 0.3, opacity: 0, transition: QUICK }}>
+                <Star className={`size-4 drop-shadow ${selected ? 'fill-[var(--lq-accent)] text-[var(--lq-accent)]' : 'fill-white text-white'}`} aria-label="Favorite" />
+              </motion.span>
+            ) : null}
+          </AnimatePresence>
+        </span>
         {item.failed ? (
           <span title="Could not reach Telegram" className="grid size-5 place-items-center rounded-full bg-[var(--lq-danger)] text-white">
             <TriangleAlert className="size-3" aria-label="Upload failed" />
@@ -113,7 +141,7 @@ const TileView = memo(function TileView({ tile, height, selected, selecting, onO
           </span>
         ) : null}
       </div>
-    </div>
+    </motion.div>
   );
 });
 
@@ -121,9 +149,13 @@ interface PhotoGridProps {
   items: PhotoItem[];
   selection: Selection;
   onOpen: (id: number) => void;
+  /** The photo open in the viewer. The grid follows it, so closing lands on the right tile. */
+  revealId?: number | null;
+  /** The photo whose tile stays hidden while the viewer is showing it. */
+  hiddenId?: number | null;
 }
 
-export function PhotoGrid({ items, selection, onOpen }: PhotoGridProps) {
+export function PhotoGrid({ items, selection, onOpen, revealId = null, hiddenId = null }: PhotoGridProps) {
   const container = useRef<HTMLDivElement>(null);
   const [width, setWidth] = useState(0);
   const [range, setRange] = useState<[number, number]>([0, 40]);
@@ -168,6 +200,18 @@ export function PhotoGrid({ items, selection, onOpen }: PhotoGridProps) {
     };
   }, [layout]);
 
+  // Hidden behind the viewer, so this can jump. Programmatic scrolling still works with the page locked.
+  useEffect(() => {
+    const el = container.current;
+    if (revealId === null || !el) return;
+    const row = layout.rows.find((r) => r.kind === 'photos' && r.tiles.some((t) => t.item.id === revealId));
+    if (!row) return;
+    const rowTop = el.getBoundingClientRect().top + row.y;
+    if (rowTop + row.height <= 0 || rowTop >= window.innerHeight) {
+      window.scrollBy({ top: rowTop - (window.innerHeight - row.height) / 2, behavior: 'instant' });
+    }
+  }, [revealId, layout]);
+
   const visible = layout.rows.slice(range[0], range[1] + 1);
   const selecting = selection.count > 0;
 
@@ -186,6 +230,7 @@ export function PhotoGrid({ items, selection, onOpen }: PhotoGridProps) {
                   height={row.height}
                   selected={selection.selected.has(tile.item.id)}
                   selecting={selecting}
+                  hidden={hiddenId === tile.item.id}
                   onOpen={onOpen}
                   onToggle={selection.toggle}
                 />

@@ -1,5 +1,6 @@
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { ArrowLeft, Check, Images, MoreVertical, Plus, SearchX, Star, Trash2, Upload } from 'lucide-react';
+import { motion } from 'motion/react';
 import { useState } from 'react';
 import { Link, useLocation, useParams, useSearch } from 'wouter';
 import { api, thumbUrl } from '@/api';
@@ -196,7 +197,7 @@ export function AlbumsPage() {
       ) : (
         <ul className="grid grid-cols-[repeat(auto-fill,minmax(168px,1fr))] gap-x-4 gap-y-6 pt-2">
           {albums.data?.map((album) => (
-            <li key={album.id}>
+            <motion.li key={album.id} whileTap={{ scale: 0.97 }}>
               <Link href={`/albums/${album.id}`} className="group block rounded-2xl">
                 <div className="aspect-square overflow-hidden rounded-2xl bg-[var(--app-tile)]">
                   {album.coverId ? (
@@ -210,7 +211,7 @@ export function AlbumsPage() {
                 <p className="mt-2 truncate text-[14px] font-semibold">{album.title}</p>
                 <p className="text-[12.5px] text-[var(--lq-text-dim)]">{formatCount(album.photoCount, 'item')}</p>
               </Link>
-            </li>
+            </motion.li>
           ))}
         </ul>
       )}

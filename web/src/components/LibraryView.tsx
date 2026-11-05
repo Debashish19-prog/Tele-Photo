@@ -1,4 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
+import { AnimatePresence } from 'motion/react';
 import { type ReactNode, useEffect, useMemo, useState } from 'react';
 import { useLocation, useSearch } from 'wouter';
 import { api, type PhotoItem, type PhotoQuery } from '@/api';
@@ -40,6 +41,12 @@ export function LibraryView({ query, mode, heading, empty, albumId, picker }: Li
 
   const params = new URLSearchParams(search);
   const openId = (!picker && Number(params.get('photo'))) || null;
+
+  // Outlives `openId` by the length of the closing flight, so the tile only reappears once it lands.
+  const [heroId, setHeroId] = useState<number | null>(null);
+  useEffect(() => {
+    if (openId) setHeroId(openId);
+  }, [openId]);
 
   const withPhoto = (id: number | null) => {
     const next = new URLSearchParams(search);
@@ -131,7 +138,7 @@ export function LibraryView({ query, mode, heading, empty, albumId, picker }: Li
 
   return (
     <>
-      {selection.count > 0 ? <SelectionBar count={selection.count} handlers={handlers} /> : null}
+      <AnimatePresence>{selection.count > 0 ? <SelectionBar key="selection" count={selection.count} handlers={handlers} /> : null}</AnimatePresence>
       {heading}
       {photos.isPending ? (
         <div className="py-20 text-center text-[var(--lq-text-dim)]" role="status">
@@ -145,10 +152,12 @@ export function LibraryView({ query, mode, heading, empty, albumId, picker }: Li
       ) : items.length === 0 ? (
         empty
       ) : (
-        <PhotoGrid items={items} selection={selection} onOpen={onTileOpen} />
+        <PhotoGrid items={items} selection={selection} onOpen={onTileOpen} revealId={openId} hiddenId={openId ?? heroId} />
       )}
-      {openId ? (
+      <AnimatePresence onExitComplete={() => setHeroId(null)}>
+        {openId ? (
         <Lightbox
+          key="viewer"
           photoId={openId}
           items={items}
           mode={mode === 'trash' ? 'trash' : 'normal'}
@@ -158,7 +167,8 @@ export function LibraryView({ query, mode, heading, empty, albumId, picker }: Li
           onAddToAlbum={setAlbumTarget}
           onDeleteForever={askDeleteForever}
         />
-      ) : null}
+        ) : null}
+      </AnimatePresence>
       <AddToAlbumDialog
         photoIds={albumTarget}
         onClose={(added) => {

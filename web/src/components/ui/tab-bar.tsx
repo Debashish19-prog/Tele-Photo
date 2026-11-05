@@ -65,7 +65,7 @@ import { cn } from '@/lib/utils';
 /* Geometry                                                                    */
 /* -------------------------------------------------------------------------- */
 
-const BAR_PAD = 6;
+const BAR_PAD = 8;
 const ITEM_H = 46;
 const BAR_H = ITEM_H + BAR_PAD * 2;
 
@@ -341,7 +341,7 @@ const Pill = React.forwardRef<PillHandle, PillProps>(function Pill(
         }}
         className={cn(
           'pointer-events-none absolute top-0 left-0 z-0',
-          'shadow-[inset_0_1px_0_var(--lq-rim-hi),inset_0_0_0_0.5px_var(--lq-rim-lo)]',
+          'shadow-[inset_0_1px_0_var(--lq-rim-hi),inset_0_0_0_0.5px_var(--lq-rim-lo),0_2px_10px_rgb(6_16_34/0.28)]',
         )}
       />
     </>
@@ -569,6 +569,7 @@ export function TabBar({ glass, lens, className, children, ...props }: TabBarPro
   const release = React.useCallback(() => {
     window.removeEventListener('pointerup', release);
     window.removeEventListener('pointercancel', release);
+    rowRef.current?.removeAttribute('data-pressing');
     pill.current?.press(false);
     searchPill.current?.press(false);
     searchPill.current?.show(false);
@@ -597,6 +598,9 @@ export function TabBar({ glass, lens, className, children, ...props }: TabBarPro
     } else {
       settle(item);
       pill.current?.press(true);
+      // The pill is a clear lens for as long as this lasts, so a label coloured for
+      // a filled pill needs to know. A pointer press only: Space never thins the pill.
+      rowRef.current?.setAttribute('data-pressing', '');
     }
     window.addEventListener('pointerup', release);
     window.addEventListener('pointercancel', release);
@@ -620,7 +624,7 @@ export function TabBar({ glass, lens, className, children, ...props }: TabBarPro
           ref={barRef}
           inert={open || undefined}
           className="min-w-0"
-          contentClassName="p-[6px]"
+          contentClassName="p-[8px]"
         >
           {/* `isolate` keeps the pill's stacking inside the bar. It is safe next
               to `backdrop-filter`: isolation does not make an element a backdrop
@@ -638,7 +642,7 @@ export function TabBar({ glass, lens, className, children, ...props }: TabBarPro
             {...glass}
             ref={capsuleRef}
             inert={open || undefined}
-            contentClassName="p-[6px]"
+            contentClassName="p-[8px]"
           >
             <div
               className="relative isolate flex items-stretch"
@@ -728,8 +732,8 @@ export function TabBar({ glass, lens, className, children, ...props }: TabBarPro
 /* -------------------------------------------------------------------------- */
 
 export interface TabBarItemProps extends BaseTabs.Tab.Props {
-  /** The tab's symbol. Prefer a filled one — Apple's guidance, and it reads. */
-  icon: React.ReactNode;
+  /** The tab's symbol. Prefer a filled one — Apple's guidance, and it reads. Leave it out for a text tab. */
+  icon?: React.ReactNode;
   /**
    * A count, or `true` for a bare dot. Reserve it for information that warrants
    * attention; a badge on everything means a badge on nothing.
@@ -776,25 +780,27 @@ export function TabBarItem({
       {/* The sink target. Scaling the button would move the box the pill is
           measured against, so the press scales its contents instead. */}
       <span className="pointer-events-none flex flex-col items-center gap-[3px] transition-[scale] duration-150">
-        <span className="relative flex items-center justify-center [&_svg]:size-[22px]">
-          {icon}
-          {badge !== undefined && badge !== false && (
-            <span
-              aria-hidden
-              className={cn(
-                'absolute -top-1 -right-2 flex items-center justify-center rounded-full',
-                'bg-[var(--lq-danger)] font-semibold text-white tabular-nums',
-                'shadow-[0_0_0_1.5px_color-mix(in_srgb,var(--lq-text)_12%,transparent)]',
-                badge === true
-                  ? 'size-[9px]'
-                  : 'h-[16px] min-w-[16px] px-[4px] text-[10px] leading-none',
-              )}
-            >
-              {badge === true ? '' : badge > 99 ? '99+' : badge}
-            </span>
-          )}
-        </span>
-        <span className="text-[11px] leading-none font-semibold whitespace-nowrap">{children}</span>
+        {icon ? (
+          <span className="relative flex items-center justify-center [&_svg]:size-[22px]">
+            {icon}
+            {badge !== undefined && badge !== false && (
+              <span
+                aria-hidden
+                className={cn(
+                  'absolute -top-1 -right-2 flex items-center justify-center rounded-full',
+                  'bg-[var(--lq-danger)] font-semibold text-white tabular-nums',
+                  'shadow-[0_0_0_1.5px_color-mix(in_srgb,var(--lq-text)_12%,transparent)]',
+                  badge === true
+                    ? 'size-[9px]'
+                    : 'h-[16px] min-w-[16px] px-[4px] text-[10px] leading-none',
+                )}
+              >
+                {badge === true ? '' : badge > 99 ? '99+' : badge}
+              </span>
+            )}
+          </span>
+        ) : null}
+        <span className={cn('leading-none whitespace-nowrap', icon ? 'text-[11px] font-semibold' : 'nav-label text-[15px] font-medium')}>{children}</span>
         {/* Drawn over the icon, the badge lands before the label and the tab
             announces as "3 Saved". Hidden there and restated here it reads
             "Saved 3 new items". No punctuation: name computation joins the
