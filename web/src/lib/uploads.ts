@@ -1,6 +1,7 @@
+import { ApiError, getEngine } from '@/api';
 import { toWallClock } from '@/lib/format';
 
-/** Telegram's single-file ceiling: 4000 parts of 512 KiB. The server enforces the same number. */
+/** Telegram's single-file ceiling: 4000 parts of 512 KiB. The engine enforces the same number. */
 export const MAX_PHOTO_BYTES = 4000 * 512 * 1024;
 const CONCURRENCY = 3;
 
@@ -22,13 +23,13 @@ export interface LocalUpload {
 
 type Listener = () => void;
 
-/** Sends files from the browser to the server. Telegram comes after that, on the server's side. */
+/** Checks each file and makes its thumbnails. The engine's queue takes it from there to Telegram. */
 class Uploader {
   private entries: LocalUpload[] = [];
   private readonly listeners = new Set<Listener>();
   private active = 0;
   private nextKey = 1;
-  /** Called whenever a file lands on the server, so the grid can show it straight away. */
+  /** Called whenever a file is ready, so the grid can show it straight away. */
   onReceived: (() => void) | null = null;
 
   subscribe = (listener: Listener) => {
@@ -49,7 +50,7 @@ class Uploader {
     this.emit();
   }
 
-  /** True while leaving the page would lose something that has not reached the server. */
+  /** True while files are still being prepared. The engine's queue answers for what comes after. */
   get isBusy(): boolean {
     return this.entries.some((e) => e.stage === 'waiting' || e.stage === 'sending');
   }
@@ -112,45 +113,28 @@ class Uploader {
     }
   }
 
-  private send(entry: LocalUpload): Promise<void> {
-    return new Promise((resolve) => {
-      const form = new FormData();
-      form.append('file', entry.file!, entry.filename);
-      const xhr = new XMLHttpRequest();
-      xhr.open('POST', `/api/uploads?lastModified=${encodeURIComponent(toWallClock(entry.file!.lastModified))}`);
-      xhr.upload.onprogress = (event) => {
-        if (event.lengthComputable) this.patch(entry.key, { progress: event.loaded / event.total });
-      };
-      xhr.onerror = () => {
-        this.patch(entry.key, { stage: 'error', error: 'Lost the connection to the server.' });
-        resolve();
-      };
-      xhr.onload = () => {
-        let body: { id?: number; duplicate?: boolean; restored?: boolean; error?: { message?: string } } | null = null;
-        try {
-          body = JSON.parse(xhr.responseText);
-        } catch {
-          // Reported as a failure below.
-        }
-        if (xhr.status >= 200 && xhr.status < 300 && body?.id) {
-          this.patch(entry.key, {
-            stage: body.restored ? 'restored' : body.duplicate ? 'duplicate' : 'received',
-            progress: 1,
-            photoId: body.id,
-            // Nothing further needs it, and holding on to a File keeps it in memory for no reason.
-            file: null,
-          });
-          this.onReceived?.();
-        } else {
-          const message = body?.error?.message ?? 'The server could not take this file.';
-          // A file refused for what it is would be refused again, so there is nothing to retry.
-          const permanent = xhr.status >= 400 && xhr.status < 500 && xhr.status !== 401 && xhr.status !== 429;
-          this.patch(entry.key, { stage: 'error', error: message, ...(permanent ? { file: null } : {}) });
-        }
-        resolve();
-      };
-      xhr.send(form);
-    });
+  private async send(entry: LocalUpload): Promise<void> {
+    const file = entry.file!;
+    try {
+      const engine = await getEngine();
+      const result = await engine.ingest(file, entry.filename, toWallClock(file.lastModified), (fraction) => this.patch(entry.key, { progress: fraction }));
+      this.patch(entry.key, {
+        stage: result.restored ? 'restored' : result.duplicate ? 'duplicate' : 'received',
+        progress: 1,
+        photoId: result.id,
+        // The queue holds its own reference, and this list does not need one any more.
+        file: null,
+      });
+      this.onReceived?.();
+    } catch (err) {
+      // A file refused for what it is would be refused again, so there is nothing to retry.
+      const permanent = err instanceof ApiError && err.status >= 400 && err.status < 500 && err.status !== 401 && err.status !== 429;
+      this.patch(entry.key, {
+        stage: 'error',
+        error: err instanceof Error ? err.message : 'This file could not be read.',
+        ...(permanent ? { file: null } : {}),
+      });
+    }
   }
 }
 

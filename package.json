@@ -1,17 +1,16 @@
 {
   "name": "tele-photo",
   "private": true,
-  "version": "0.1.0",
-  "description": "A Google Photos alternative that stores your originals in your own Telegram account.",
+  "version": "0.2.0",
+  "description": "A Google Photos alternative that stores your originals in your own Telegram account, and runs entirely in the browser.",
   "type": "module",
   "engines": {
     "node": ">=22"
   },
   "scripts": {
-    "dev": "pnpm --parallel --filter ./server --filter ./web dev",
-    "build": "pnpm --filter ./web build && pnpm --filter ./server build",
-    "start": "pnpm --filter ./server start",
-    "test": "pnpm --filter ./server test",
-    "verify:telegram": "pnpm --filter ./server verify:telegram"
+    "dev": "pnpm --filter ./web dev",
+    "build": "pnpm --filter ./web build",
+    "preview": "pnpm --filter ./web preview",
+    "test": "pnpm --filter ./web test"
   }
 }

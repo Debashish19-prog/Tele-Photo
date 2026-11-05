@@ -1,3 +1,4 @@
+import '@/engine/polyfills';
 import { QueryCache, QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { MotionConfig } from 'motion/react';
 import { StrictMode } from 'react';

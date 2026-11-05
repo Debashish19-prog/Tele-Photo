@@ -1,7 +1,8 @@
 import { useQuery } from '@tanstack/react-query';
 import { Images, Plus } from 'lucide-react';
 import { useState } from 'react';
-import { api, thumbUrl } from '@/api';
+import { api } from '@/api';
+import { useMedia } from '@/hooks/useMedia';
 import { Button } from '@/components/ui/button';
 import { Dialog, DialogActions, DialogContent, DialogDismiss, DialogTitle } from '@/components/ui/dialog';
 import { Input } from '@/components/ui/input';
@@ -59,7 +60,7 @@ export function AddToAlbumDialog({ photoIds, onClose }: { photoIds: number[] | n
                 className="flex w-full cursor-pointer items-center gap-3 rounded-xl p-1.5 text-left hover:bg-[var(--lq-highlight)]"
               >
                 {album.coverId ? (
-                  <img src={thumbUrl(album.coverId)} alt="" className="size-11 flex-none rounded-lg object-cover" />
+                  <CoverThumb id={album.coverId} />
                 ) : (
                   <span className="grid size-11 flex-none place-items-center rounded-lg bg-[var(--app-tile)] text-[var(--lq-text-dim)]">
                     <Images className="size-5" aria-hidden="true" />
@@ -79,4 +80,9 @@ export function AddToAlbumDialog({ photoIds, onClose }: { photoIds: number[] | n
       </DialogContent>
     </Dialog>
   );
+}
+
+function CoverThumb({ id }: { id: number }) {
+  const { url } = useMedia(id, 'thumb');
+  return url ? <img src={url} alt="" className="size-11 flex-none rounded-lg object-cover" /> : <div className="size-11 flex-none rounded-lg bg-[var(--app-tile)]" />;
 }

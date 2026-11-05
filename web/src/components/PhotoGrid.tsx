@@ -1,9 +1,10 @@
 import { Check, CheckCircle2, Circle, CloudUpload, FileImage, Star, TriangleAlert } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
-import { type PhotoItem, thumbUrl } from '@/api';
+import type { PhotoItem } from '@/api';
 import { Scrubber } from '@/components/Scrubber';
 import type { Selection } from '@/hooks/useSelection';
+import { useMedia } from '@/hooks/useMedia';
 import { extensionOf } from '@/lib/format';
 import { buildLayout, firstRowAt, type Layout, type Tile } from '@/lib/layout';
 import { QUICK } from '@/lib/motion';
@@ -32,6 +33,22 @@ interface TileViewProps {
   onToggle: (id: number, range: boolean) => void;
 }
 
+/** Only rows near the screen exist, so mounting one of these is what asks for its thumbnail. */
+function TileImage({ id, alt, selected }: { id: number; alt: string; selected: boolean }) {
+  const { url } = useMedia(id, 'thumb');
+  if (!url) return null;
+  return (
+    <motion.img
+      src={url}
+      alt={alt}
+      decoding="async"
+      draggable={false}
+      initial={false}
+      animate={{ scale: selected ? 0.86 : 1, borderRadius: selected ? 10 : 0 }}
+    />
+  );
+}
+
 const TileView = memo(function TileView({ tile, height, selected, selecting, hidden, onOpen, onToggle }: TileViewProps) {
   const { item, x, width } = tile;
   const press = useRef<{ timer: number; x: number; y: number; fired: boolean } | null>(null);
@@ -50,15 +67,7 @@ const TileView = memo(function TileView({ tile, height, selected, selecting, hid
           </div>
         </div>
       ) : (
-        <motion.img
-          src={thumbUrl(item.id)}
-          alt={item.filename}
-          loading="lazy"
-          decoding="async"
-          draggable={false}
-          initial={false}
-          animate={{ scale: selected ? 0.86 : 1, borderRadius: selected ? 10 : 0 }}
-        />
+        <TileImage id={item.id} alt={item.filename} selected={selected} />
       )}
       <div className="tile-scrim" />
       <button

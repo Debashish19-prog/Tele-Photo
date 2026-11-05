@@ -3,7 +3,8 @@ import { ArrowLeft, Check, Images, MoreVertical, Plus, SearchX, Star, Trash2, Up
 import { motion } from 'motion/react';
 import { useState } from 'react';
 import { Link, useLocation, useParams, useSearch } from 'wouter';
-import { api, thumbUrl } from '@/api';
+import { api } from '@/api';
+import { useMedia } from '@/hooks/useMedia';
 import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 import { EmptyState } from '@/components/EmptyState';
 import { Tip } from '@/components/IconAction';
@@ -180,6 +181,11 @@ function NewAlbumDialog({ open, onClose }: { open: boolean; onClose: () => void 
   );
 }
 
+function AlbumCover({ id }: { id: number }) {
+  const { url } = useMedia(id, 'thumb');
+  return url ? <img src={url} alt="" className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" /> : null;
+}
+
 export function AlbumsPage() {
   const albums = useQuery({ queryKey: ['albums'], queryFn: api.albums });
   const [creating, setCreating] = useState(false);
@@ -201,7 +207,7 @@ export function AlbumsPage() {
               <Link href={`/albums/${album.id}`} className="group block rounded-2xl">
                 <div className="aspect-square overflow-hidden rounded-2xl bg-[var(--app-tile)]">
                   {album.coverId ? (
-                    <img src={thumbUrl(album.coverId)} alt="" loading="lazy" className="size-full object-cover transition-transform duration-300 group-hover:scale-[1.03]" />
+                    <AlbumCover id={album.coverId} />
                   ) : (
                     <div className="grid size-full place-items-center text-[var(--lq-text-dim)]">
                       <Images className="size-9" aria-hidden="true" />

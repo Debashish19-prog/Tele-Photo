@@ -168,7 +168,7 @@ export function LoginScreen({ storage, configured, reason, onSignedIn }: LoginSc
             placeholder: '+1 555 123 4567',
             type: 'tel',
             autoComplete: 'tel',
-            // Spaces alone would pass `required`, and the server can do nothing with them.
+            // Spaces alone would pass `required`, and Telegram can do nothing with them.
             pattern: '.*\\d.*',
             title: 'Your phone number, with its country code',
           } satisfies InputHTMLAttributes<HTMLInputElement>,
@@ -283,7 +283,7 @@ export function LoginScreen({ storage, configured, reason, onSignedIn }: LoginSc
         </main>
 
         <footer className="login-footnote">
-          Originals are kept at full quality in a private channel on your account. Thumbnails and search stay on this server.
+          Originals are kept at full quality in a private channel on your account. Your browser talks directly to Telegram, and this site never receives your code, password or photos.
         </footer>
       </div>
     </div>
@@ -312,10 +312,9 @@ function SetupNeeded() {
           .
         </li>
         <li>
-          Copy <code className="font-mono text-[12px]">.env.example</code> to <code className="font-mono text-[12px]">.env</code> and fill in{' '}
-          <code className="font-mono text-[12px]">TELEGRAM_API_ID</code> and <code className="font-mono text-[12px]">TELEGRAM_API_HASH</code>.
+          Set <code className="font-mono text-[12px]">VITE_TELEGRAM_API_ID</code> and <code className="font-mono text-[12px]">VITE_TELEGRAM_API_HASH</code> in your Vercel project's environment variables, or in <code className="font-mono text-[12px]">.env</code> on your own computer.
         </li>
-        <li>Restart the server, then reload this page.</li>
+        <li>Build the site again, then reload this page.</li>
       </ol>
     </GlassCard>
   );

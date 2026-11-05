@@ -4,100 +4,112 @@ A Google Photos alternative that keeps your originals in your own Telegram accou
 
 You sign in with your Telegram phone number. Tele-Photo creates a private channel on your account called **Tele-Photo Library** and stores each photo there as one untouched file. A timeline, albums, favorites, search and a trash all run on top of it, in a liquid glass interface.
 
+It runs entirely in your browser. There is no server and no database, so it can be hosted for free on any static host, and any number of people can use the same site without sharing anything.
+
 ![The Tele-Photo timeline, with glass panels floating over a grid of photos](docs/screenshots/timeline.webp)
 
 [See all the screenshots](#screenshots)
 
-## Setup
+## Put it on Vercel
 
-You need Node 22 or newer, [pnpm](https://pnpm.io), and a free Telegram API key.
+You need a Vercel account, this repository on GitHub, and a free Telegram API key.
 
 1. Go to [my.telegram.org/apps](https://my.telegram.org/apps), sign in, and create an app. Any name works. Keep the **api_id** and **api_hash** it gives you.
-2. Install and configure:
+2. In Vercel, choose **Add New → Project** and import the repository. Leave the root directory as it is, because `vercel.json` already says how to build.
+3. Under **Environment Variables**, add `VITE_TELEGRAM_API_ID` and `VITE_TELEGRAM_API_HASH`.
+4. Deploy. Changing these variables later needs a new deployment, as they are built into the site.
 
-   ```bash
-   pnpm install
-   cp .env.example .env     # then fill in TELEGRAM_API_ID and TELEGRAM_API_HASH
-   ```
-
-3. Build and start:
-
-   ```bash
-   pnpm build
-   pnpm start
-   ```
-
-4. Open <http://127.0.0.1:8787> and sign in with your phone number. Telegram sends the code to your Telegram app.
+Vercel's free Hobby plan is for [non-commercial use only](https://vercel.com/docs/limits/fair-use-guidelines), so charging for this or showing ads needs a paid plan. Nothing here is specific to Vercel apart from `vercel.json`. Any host that serves static files over HTTPS works, as long as it sends the same security headers.
 
 ### Confirm it works with real Telegram
 
-Once you have signed in, stop the server and run this once:
+Once you have signed in, open the account menu and choose **Check Telegram storage**.
+
+It sends a few generated images to your library channel, downloads each one, compares SHA-256 hashes, and deletes them again. It also saves and reads back the file that holds your albums. Every line should get a tick. This is the one check the automated tests cannot do for you, because they have no Telegram account to use.
+
+**Do this before trusting it with anything.** The automated tests run the real Telegram client code with the network replaced, and a real connection has been made from the browser to Telegram, but no real account has been through this version yet.
+
+### Run it on your own computer
+
+You need Node 22 or newer and [pnpm](https://pnpm.io).
 
 ```bash
-pnpm verify:telegram
+pnpm install
+cp .env.example .env     # then fill in VITE_TELEGRAM_API_ID and VITE_TELEGRAM_API_HASH
+pnpm dev
 ```
 
-It sends a few generated images to your library channel, downloads each one, compares SHA-256 hashes, and deletes them again. Every format should print `PASS`. This is the one check the automated tests cannot do for you, because they have no Telegram account to use.
+Then open <http://localhost:5173>. It has to be `localhost` or HTTPS, because browsers only offer the cryptography it needs on secure pages. That means opening it from your phone by its network address will not work, while a deployed site will.
+
+## Can other people use it?
+
+Yes. Everyone opens the same link and signs in with their own number. Each person's library lives in their own Telegram and their own browser, so people cannot see each other's photos, and more users cost you nothing in storage or bandwidth.
+
+Be honest with them about these:
+
+- **They are trusting the site.** The site never receives their login or photos, and `vercel.json` stops the page sending data anywhere but Telegram. But whoever controls the deployment controls the code, and could change both. That is true of any web app, including Telegram's own. Someone who would rather not trust you can deploy their own copy.
+- **The sign-in is a full Telegram login.** Inside their browser, the app holds a session with full access to their account, like Telegram Web does. It shows up under Devices in Telegram as "Tele-Photo", and they can end it there at any time. Anyone with access to that browser profile has access to the session, so it should not be used on a shared computer without signing out.
+- **Telegram warns people never to share login codes**, and a site asking for one can look like phishing. A code typed here only goes to Telegram, but people cannot verify that by looking, so say so plainly.
+- **Everyone shares your API key.** It is visible in the site's code, which is normal for a Telegram client. Telegram holds the key's owner responsible for how it is used, and can [withdraw access](https://core.telegram.org/api/terms) if its terms are broken. That would lock everyone out of the app at once, though their photos would stay in their own Telegram.
+- **You cannot limit who signs in.** The old phone allowlist needed a server to enforce it. Strangers using your link cost you nothing and cannot see anyone's photos, but they would count against your API key.
 
 ## How your photos are stored
 
 ```
-Browser ──► Server ──► SHA-256, EXIF, thumbnails ──► Telegram private channel
-                │                                      one photo = one message
-                └── SQLite index + thumbnails (local)
+Browser ──► SHA-256, EXIF, thumbnails ──► Telegram private channel
+   │                                       one photo = one message
+   └── index + thumbnail cache (IndexedDB)  + one file of albums and favorites
 ```
 
-| What | Where | Lost if this machine dies? |
+Photos go directly from the browser to Telegram over an encrypted WebSocket. No server is involved at any point.
+
+| What | Where | Lost if this browser's data is cleared? |
 | --- | --- | --- |
 | Original photos | Your Telegram channel | No |
 | Capture date, dimensions, content hash | Telegram (in each caption) and the local index | No |
-| Thumbnails, camera details, search index | Local (`data/`) | No, rebuilt from Telegram |
-| Albums and favorites | Local (`data/`) only | **Yes** |
+| A small thumbnail | Telegram (attached to each photo) and a local cache | No |
+| Albums, favorites, Trash, camera details | A file pinned in your Telegram channel, and locally | No, as long as it had time to save |
+| Larger previews for the viewer | Local cache, rebuilt from the original when needed | No |
 
-**Back up the `data/` folder if your albums and favorites matter to you.**
+To rebuild, just sign in. The app finds your existing channel and restores the library, without downloading your originals. You can also run this any time from the account menu with **Restore from Telegram**. Libraries uploaded by the earlier server version are found the same way, though albums and favorites from its `data/` folder do not carry over.
 
-To rebuild after losing `data/`, sign in again. The app finds your existing channel and restores the library automatically. You can also run this any time from the account menu with **Restore from Telegram**.
+### Using more than one device
+
+Sign in on each one. Photos and changes from other devices appear when you open the app or return to it. If two devices change the same photo or album, whichever changed it last wins, going by each device's clock.
 
 ### Why quality stays intact
 
 - Photos are sent as **documents with `force_file` set**, never as Telegram photos, which get recompressed.
 - After each upload the app checks that Telegram kept a document of exactly the same size. If not, it deletes that message and tries again.
-- The original bytes are never modified. Only the web-sized thumbnails and previews are generated copies, and they stay on your server.
+- The original bytes are never modified. Only the thumbnails and previews are generated copies.
 - Each photo's SHA-256 is recorded at upload, which also stops the same photo being stored twice.
 
 ### If something goes wrong mid-upload
 
-The local copy is deleted only after Telegram has confirmed the file and that has been saved to the database, so a crash cannot lose a photo. Uploads resume on the next start. Rate limits from Telegram pause the queue rather than failing it. Files that keep failing stay on the server and appear in the uploads panel with a **Retry** button.
+The original stays on your device throughout, so nothing can be lost. Rate limits from Telegram pause the queue rather than failing it, and repeated failures stay in the uploads panel with a **Retry** button.
+
+**Uploads only run while the tab is open**, as there is no server to finish them. The page warns you before you leave, and asks a phone not to sleep while uploading. If a tab closes anyway, add the same files again: finished ones are recognised, and the rest pick up from there.
 
 ## Good to know
 
 - **Size limit:** 2,097,152,000 bytes per photo (about 1.95 GB). This is Telegram's real ceiling for non-Premium accounts: 4000 parts of 512 KB. Larger files are refused up front.
-- **Formats:** anything that is recognisably an image, by its contents rather than its name. JPEG, PNG, WebP, GIF, AVIF, TIFF and HEIC get thumbnails. Camera RAW uses its embedded preview when it has one. If no preview can be made, the photo is still stored and gets a placeholder tile.
-- **Privacy:** only your account can see the channel, but channels are not end-to-end encrypted, so Telegram itself could read them. The server also holds your Telegram session, encrypted at rest. That session is full access to your account, so keep `data/` private. Use **Disconnect Telegram** in the account menu, or end the session under Devices in Telegram, to revoke it.
-- **Your Telegram account:** this uses the official API with your own key, signing in like any third-party client. Telegram does not promise it as a storage service, and it can rate-limit or restrict accounts it considers abusive. Bulk uploads are paced to respect its limits, but keep other copies of anything irreplaceable.
-- **Deleting:** Trash keeps photos for 30 days (`TP_TRASH_RETENTION_DAYS`), then deletes them from Telegram for good. Deleting the channel from inside Telegram deletes your originals, and the app cannot get them back.
+- **Formats:** anything that is recognisably an image, by its contents rather than its name. Thumbnails depend on what your browser can read: JPEG, PNG, WebP, GIF and AVIF everywhere, and HEIC through a built-in decoder. Camera RAW uses its embedded preview when it has one. TIFF only gets a thumbnail in Safari. If no preview can be made, the photo is still stored and gets a placeholder tile.
+- **Privacy:** only your account can see the channel, but channels are not end-to-end encrypted, so Telegram itself could read them.
+- **Your Telegram account:** this uses the official API, signing in like any third-party client. Telegram does not promise it as a storage service, and it can rate-limit or restrict accounts it considers abusive. Bulk uploads are paced to respect its limits, but keep other copies of anything irreplaceable.
+- **Deleting:** Trash keeps photos for 30 days (`VITE_TRASH_RETENTION_DAYS`), then deletes them from Telegram for good. With no server to do this on schedule, it happens the next time the app is open after that, so never early. Deleting the channel from inside Telegram deletes your originals, and the app cannot get them back.
+- **One tab at a time:** the app runs in a single tab, and a second one offers to take over.
+- **Signing out** ends that browser's Telegram session and clears its local data. Everything else stays safe in Telegram.
 - **Glass effect:** true refraction appears in Chromium browsers. Safari and Firefox automatically show frosted glass instead.
-
-## Using it from other devices
-
-The server listens on this computer only by default. To reach it from your phone on the same Wi-Fi, set these in `.env`:
-
-```bash
-HOST=0.0.0.0
-TP_ALLOWED_PHONES=+15551234567   # your number, so nobody else on the network can sign in
-```
-
-Do not expose it to the internet without HTTPS in front of it (a reverse proxy works). Then also set `TP_COOKIE_SECURE=true`.
 
 ## Screenshots
 
-These were taken in demo mode with stock sample photos from [Lorem Picsum](https://picsum.photos), which is why they carry a yellow banner. In demo mode nothing really goes to Telegram, even where a label says it did. Select any image to see it full size.
+These were taken in demo mode with stock sample photos from [Lorem Picsum](https://picsum.photos), which is why they carry a yellow banner. In demo mode nothing really goes to Telegram, even where a label says it did. Select any image to see it full size. Most predate the move into the browser, so a few still show older wording such as "Sending to server" or "Disconnect Telegram".
 
 ### Signing in
 
 <table>
 <tr><td width="50%" valign="top"><a href="docs/screenshots/sign-in.webp"><img src="docs/screenshots/sign-in.webp" alt="Glass sign-in card over a photo of snowy mountains"></a><br>Sign in with your Telegram phone number.</td><td width="50%" valign="top"><a href="docs/screenshots/sign-in-wrong-code.webp"><img src="docs/screenshots/sign-in-wrong-code.webp" alt="Sign-in card showing a code error"></a><br>A wrong code gets a clear message, and you can try again.</td></tr>
-<tr><td width="50%" valign="top"><a href="docs/screenshots/setup-needed.webp"><img src="docs/screenshots/setup-needed.webp" alt="Setup instructions on the sign-in card"></a><br>Shown until your API key is in <code>.env</code>.</td><td width="50%" valign="top"><a href="docs/screenshots/empty-library.webp"><img src="docs/screenshots/empty-library.webp" alt="Empty library with an upload button"></a><br>A new library, ready for its first photos.</td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/setup-needed.webp"><img src="docs/screenshots/setup-needed.webp" alt="Setup instructions on the sign-in card"></a><br>Shown until the site is built with your API key.</td><td width="50%" valign="top"><a href="docs/screenshots/empty-library.webp"><img src="docs/screenshots/empty-library.webp" alt="Empty library with an upload button"></a><br>A new library, ready for its first photos.</td></tr>
 </table>
 
 ### Uploading
@@ -140,7 +152,7 @@ These were taken in demo mode with stock sample photos from [Lorem Picsum](https
 ### Account and dark mode
 
 <table>
-<tr><td width="50%" valign="top"><a href="docs/screenshots/account-menu.webp"><img src="docs/screenshots/account-menu.webp" alt="Account menu with appearance options"></a><br>Appearance, restore, sign out and disconnect.</td><td width="50%" valign="top"><a href="docs/screenshots/account-menu-over-photos.webp"><img src="docs/screenshots/account-menu-over-photos.webp" alt="Account menu open over photos"></a><br>The menu stays readable over any photo.</td></tr>
+<tr><td width="50%" valign="top"><a href="docs/screenshots/account-menu.webp"><img src="docs/screenshots/account-menu.webp" alt="Account menu with appearance options"></a><br>Appearance, restore, the storage check and sign out.</td><td width="50%" valign="top"><a href="docs/screenshots/account-menu-over-photos.webp"><img src="docs/screenshots/account-menu-over-photos.webp" alt="Account menu open over photos"></a><br>The menu stays readable over any photo.</td></tr>
 <tr><td width="50%" valign="top"><a href="docs/screenshots/dark.webp"><img src="docs/screenshots/dark.webp" alt="Timeline in dark mode"></a><br>Dark mode.</td><td width="50%" valign="top"><a href="docs/screenshots/dark-scrolled.webp"><img src="docs/screenshots/dark-scrolled.webp" alt="Scrolled timeline in dark mode"></a><br>Photos scroll underneath the glass.</td></tr>
 </table>
 
@@ -155,22 +167,26 @@ These were taken in demo mode with stock sample photos from [Lorem Picsum](https
 ## Development
 
 ```bash
-pnpm dev              # server on :8787, web app with hot reload on :5173
-pnpm test             # server test suite
+pnpm dev              # the web app with hot reload, on :5173
+pnpm test             # the test suite
 ```
 
-To try the app without a Telegram account, set `TP_STORAGE=fake` in `.env`. Any phone number works with code `12345` (a number ending in 2 also asks for the password `hunter2`). Photos stay on local disk, and a yellow banner says so.
+To try the app without a Telegram account, set `VITE_STORAGE=fake` in `.env`. Any phone number works with code `12345` (a number ending in 2 also asks for the password `hunter2`). Photos stay in the browser, and a yellow banner says so.
 
 | Path | What it does |
 | --- | --- |
-| `server/src/storage/telegram.ts` | Everything that talks to Telegram |
-| `server/src/storage/fake.ts` | The stand-in used by tests and demo mode |
-| `server/src/queue.ts` | The durable upload queue |
-| `server/src/media.ts` | File checks, EXIF, thumbnails |
-| `server/src/caption.ts` | What each Telegram message's caption holds |
+| `web/src/engine/index.ts` | Everything the app can do, in one place |
+| `web/src/engine/telegram.ts` | Everything that talks to Telegram |
+| `web/src/engine/fake.ts` | The stand-in used by tests and demo mode |
+| `web/src/engine/store.ts` | The local index, in memory and IndexedDB |
+| `web/src/engine/queue.ts` | The upload queue |
+| `web/src/engine/sync.ts` | Albums and favorites between devices |
+| `web/src/engine/media.ts` | File checks, EXIF, thumbnails |
+| `web/src/engine/caption.ts` | What each Telegram message's caption holds |
 | `web/src/components/` | The interface |
 | `web/src/components/ui/` | [Liqui UI](https://liqui.design) components, installed as source |
+| `vercel.json` | How to build the site, and the security headers it must be served with |
 
-The stack is Fastify, SQLite and [GramJS](https://github.com/gram-js/gramjs) on the server, and React, Tailwind, Liqui UI and [Motion](https://motion.dev) in the browser.
+The stack is [GramJS](https://github.com/gram-js/gramjs), IndexedDB, React, Tailwind, Liqui UI and [Motion](https://motion.dev), all in the browser.
 
 The photo on the sign-in screen and behind the app is [Rogers Peak in Winter](https://commons.wikimedia.org/wiki/File:Rogers_Peak_in_Winter_(de4cdfd1-f792-4696-84d1-c911d2b4f2e9).JPG) by the US National Park Service, which is in the public domain. It is colour-graded for this app.

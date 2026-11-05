@@ -1,182 +1,88 @@
-export class ApiError extends Error {
-  constructor(
-    public readonly status: number,
-    public readonly code: string,
-    message: string,
-  ) {
-    super(message);
-    this.name = 'ApiError';
-  }
-}
+import { downloadOriginals } from '@/engine/download';
+import { FakeStorage } from '@/engine/fake';
+import { Engine, UserFacingError } from '@/engine/index';
+import { type VerifyResult, verifyStorage } from '@/engine/verify';
 
-async function request<T>(path: string, init: RequestInit = {}): Promise<T> {
-  const res = await fetch(path, {
-    ...init,
-    credentials: 'same-origin',
-    headers: init.body ? { 'content-type': 'application/json', ...init.headers } : init.headers,
+export type {
+  Account, Album, LibraryStats, PhotoDetail, PhotoItem, PhotoQuery, QueueItem, ScanState, Session, UploadStatus,
+} from '@/engine/index';
+export type { VerifyResult };
+/** Failures come from the engine in this browser now, with the same shape the screens already handled. */
+export { UserFacingError as ApiError };
+
+const apiId = Number.parseInt(import.meta.env.VITE_TELEGRAM_API_ID ?? '', 10);
+const apiHash = (import.meta.env.VITE_TELEGRAM_API_HASH ?? '').trim();
+const isFake = import.meta.env.VITE_STORAGE === 'fake';
+const hasKeys = Number.isFinite(apiId) && apiId > 0 && apiHash !== '';
+const retention = Number.parseInt(import.meta.env.VITE_TRASH_RETENTION_DAYS ?? '', 10);
+
+let starting: Promise<Engine> | null = null;
+
+async function boot(): Promise<Engine> {
+  // GramJS is most of the app's code, and is only needed once this tab is really going to use it.
+  const storage = isFake ? new FakeStorage() : new (await import('@/engine/telegram')).TelegramStorage(apiId || 0, apiHash);
+  return Engine.open({
+    storage,
+    configured: isFake || hasKeys,
+    trashRetentionDays: Number.isFinite(retention) && retention > 0 ? retention : undefined,
   });
-  if (!res.ok) {
-    const body = (await res.json().catch(() => null)) as { error?: { code?: string; message?: string } } | null;
-    throw new ApiError(res.status, body?.error?.code ?? 'UNKNOWN', body?.error?.message ?? 'Something went wrong. Please try again.');
-  }
-  return (await res.json()) as T;
 }
 
-const post = <T>(path: string, body: unknown = {}) => request<T>(path, { method: 'POST', body: JSON.stringify(body) });
-const patch = <T>(path: string, body: unknown) => request<T>(path, { method: 'PATCH', body: JSON.stringify(body) });
-
-export interface Account {
-  id: number;
-  firstName: string;
-  lastName: string;
-  username: string;
-  phone: string;
-  needsReauth: boolean;
+/** One engine for the whole tab, started the first time anything needs it. */
+export function getEngine(): Promise<Engine> {
+  starting ??= boot().catch((err) => {
+    starting = null;
+    throw err;
+  });
+  return starting;
 }
 
-export interface Session {
-  storage: 'telegram' | 'fake';
-  configured: boolean;
-  account: Account | null;
+/** Stops this tab's engine, for when another tab takes over the library. */
+export async function stopEngine(): Promise<void> {
+  const running = starting;
+  starting = null;
+  await running?.then((engine) => engine.close()).catch(() => undefined);
 }
 
-export interface PhotoItem {
-  id: number;
-  width: number;
-  height: number;
-  takenAt: string;
-  filename: string;
-  favorite: boolean;
-  pending: boolean;
-  failed: boolean;
-  noPreview: boolean;
-  previewComing: boolean;
-}
-
-type WireItem = [number, number, number, string, number, string];
-
-function decodeItem([id, width, height, takenAt, flags, filename]: WireItem): PhotoItem {
-  return {
-    id, width, height, takenAt, filename,
-    favorite: (flags & 1) !== 0,
-    pending: (flags & 2) !== 0,
-    failed: (flags & 4) !== 0,
-    noPreview: (flags & 8) !== 0,
-    previewComing: (flags & 16) !== 0,
-  };
-}
-
-export interface PhotoDetail {
-  id: number;
-  filename: string;
-  mime: string;
-  size: number;
-  width: number | null;
-  height: number | null;
-  takenAt: string;
-  takenSource: 'exif' | 'file' | 'upload' | 'telegram';
-  uploadedAt: number;
-  sha256: string;
-  camera: { make: string | null; model: string | null; lens: string | null; iso: number | null; fNumber: number | null; exposureTime: number | null; focalLength: number | null };
-  location: { lat: number; lon: number } | null;
-  status: 'queued' | 'uploading' | 'stored' | 'failed';
-  error: string | null;
-  telegramMessageId: number | null;
-  previewState: 'ready' | 'missing' | 'unavailable';
-  favorite: boolean;
-  trashedAt: number | null;
-  purgeAt: number | null;
-  albums: { id: number; title: string }[];
-}
-
-export interface Album {
-  id: number;
-  title: string;
-  photoCount: number;
-  coverId: number | null;
-  updatedAt: number;
-}
-
-export interface LibraryStats {
-  count: number;
-  bytes: number;
-  trash: number;
-  pending: number;
-  failed: number;
-}
-
-export interface ScanState {
-  running: boolean;
-  scanned: number;
-  added: number;
-  error: string | null;
-}
-
-export interface ServerUpload {
-  id: number;
-  filename: string;
-  size: number;
-  status: 'queued' | 'uploading' | 'failed';
-  progress: number | null;
-  error: string | null;
-  nextAttemptAt: number | null;
-}
-
-export interface UploadStatus {
-  items: ServerUpload[];
-  stats: LibraryStats;
-  scan: ScanState;
-}
-
-export type PhotoQuery = { view?: 'favorites' | 'trash'; album?: number; q?: string };
+const withEngine = <T>(work: (engine: Engine) => T | Promise<T>) => getEngine().then(work);
 
 export const api = {
-  session: () => request<Session>('/api/session'),
-  sendCode: (phone: string) => post<{ loginId: string; delivery: 'app' | 'other' }>('/api/auth/phone', { phone }),
-  submitCode: (loginId: string, code: string) => post<{ status: 'ok' } | { status: 'password'; hint: string }>('/api/auth/code', { loginId, code }),
-  submitPassword: (loginId: string, password: string) => post<{ status: 'ok' }>('/api/auth/password', { loginId, password }),
-  logout: () => post('/api/auth/logout'),
-  disconnect: () => post('/api/auth/disconnect'),
+  session: () => withEngine((e) => e.session()),
+  sendCode: (phone: string) => withEngine((e) => e.sendCode(phone)),
+  submitCode: (loginId: string, code: string) => withEngine((e) => e.submitCode(loginId, code)),
+  submitPassword: (loginId: string, password: string) => withEngine((e) => e.submitPassword(loginId, password)),
+  signOut: () => withEngine((e) => e.signOut()),
 
-  photos: async (query: PhotoQuery): Promise<PhotoItem[]> => {
-    const params = new URLSearchParams();
-    if (query.view) params.set('view', query.view);
-    if (query.album) params.set('album', String(query.album));
-    if (query.q) params.set('q', query.q);
-    const { items } = await request<{ items: WireItem[] }>(`/api/photos?${params}`);
-    return items.map(decodeItem);
-  },
-  photo: (id: number) => request<PhotoDetail>(`/api/photos/${id}`),
-  setFavorite: (ids: number[], favorite: boolean) => patch('/api/photos', { ids, favorite }),
-  setTrashed: (ids: number[], trashed: boolean) => patch('/api/photos', { ids, trashed }),
-  deleteForever: (ids: number[]) => post<{ deleted: number; skipped: number }>('/api/photos/delete-permanently', { ids }),
-  emptyTrash: () => post<{ deleted: number; skipped: number }>('/api/trash/empty'),
+  photos: (query: Parameters<Engine['photos']>[0]) => withEngine((e) => e.photos(query)),
+  photo: (id: number) => withEngine((e) => e.photo(id)),
+  setFavorite: (ids: number[], favorite: boolean) => withEngine((e) => e.setFavorite(ids, favorite)),
+  setTrashed: (ids: number[], trashed: boolean) => withEngine((e) => e.setTrashed(ids, trashed)),
+  deleteForever: (ids: number[]) => withEngine((e) => e.deleteForever(ids)),
+  emptyTrash: () => withEngine((e) => e.emptyTrash()),
 
-  albums: async () => (await request<{ albums: Album[] }>('/api/albums')).albums,
-  album: (id: number) => request<Album>(`/api/albums/${id}`),
-  createAlbum: (title: string, photoIds: number[] = []) => post<{ id: number }>('/api/albums', { title, photoIds }),
-  updateAlbum: (id: number, body: { title?: string; coverPhotoId?: number | null }) => patch(`/api/albums/${id}`, body),
-  deleteAlbum: (id: number) => request(`/api/albums/${id}`, { method: 'DELETE' }),
-  addToAlbum: (id: number, ids: number[]) => post(`/api/albums/${id}/photos`, { ids }),
-  removeFromAlbum: (id: number, ids: number[]) => post(`/api/albums/${id}/photos/remove`, { ids }),
+  albums: () => withEngine((e) => e.albums()),
+  album: (id: number) => withEngine((e) => e.album(id)),
+  createAlbum: (title: string, photoIds: number[] = []) => withEngine((e) => e.createAlbum(title, photoIds)),
+  updateAlbum: (id: number, body: { title?: string; coverPhotoId?: number | null }) => withEngine((e) => e.updateAlbum(id, body)),
+  deleteAlbum: (id: number) => withEngine((e) => e.deleteAlbum(id)),
+  addToAlbum: (id: number, ids: number[]) => withEngine((e) => e.addToAlbum(id, ids)),
+  removeFromAlbum: (id: number, ids: number[]) => withEngine((e) => e.removeFromAlbum(id, ids)),
 
-  uploadStatus: () => request<UploadStatus>('/api/uploads/status'),
-  retryUploads: (ids?: number[]) => post<{ retried: number }>('/api/uploads/retry', ids ? { ids } : {}),
-  cancelUpload: (id: number) => request(`/api/uploads/${id}`, { method: 'DELETE' }),
-  rescan: () => post<ScanState>('/api/library/rescan'),
-  library: () => request<{ stats: LibraryStats; trashRetentionDays: number }>('/api/library'),
+  uploadStatus: () => withEngine((e) => e.uploadStatus()),
+  retryUploads: (ids?: number[]) => withEngine((e) => e.retryUploads(ids)),
+  cancelUpload: (id: number) => withEngine((e) => e.cancelUpload(id)),
+  rescan: () => withEngine((e) => e.rescan()),
+  library: () => withEngine((e) => e.libraryInfo()),
+
+  /** Sends generated files through real Telegram and back, then compares them. */
+  verifyStorage: (onResult: (result: VerifyResult) => void) =>
+    withEngine((e) => {
+      const account = e.store.account;
+      if (!account?.session || !account.channel_id || !account.channel_access_hash) throw new UserFacingError('NOT_SIGNED_IN', 'Please sign in.', 401);
+      const context = { session: account.session, library: { channelId: account.channel_id, accessHash: account.channel_access_hash } };
+      return verifyStorage(e, context, onResult);
+    }),
 };
 
-export const thumbUrl = (id: number) => `/api/photos/${id}/thumb`;
-export const previewUrl = (id: number) => `/api/photos/${id}/preview`;
-export const originalUrl = (id: number) => `/api/photos/${id}/original`;
-
-/** Goes through the browser's own downloader, so a big file streams straight to disk. */
-export function downloadPhotos(ids: number[]): void {
-  const link = document.createElement('a');
-  link.href = ids.length === 1 ? `/api/photos/${ids[0]}/original?download=1` : `/api/photos/zip?ids=${ids.join(',')}`;
-  link.download = '';
-  document.body.append(link);
-  link.click();
-  link.remove();
-}
+/** Has to be called from the click itself, so that a browser allows the save dialog for a large download. */
+export const downloadPhotos = (ids: number[]) => withEngine((e) => downloadOriginals(e, ids));

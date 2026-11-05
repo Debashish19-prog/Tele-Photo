@@ -1,6 +1,6 @@
 const pad = (n: number) => String(n).padStart(2, '0');
 
-/** The local wall-clock time, which is what the server keeps for a photo with no EXIF date. */
+/** The local wall-clock time, which is what is kept for a photo with no EXIF date. */
 export function toWallClock(ms: number): string {
   const d = new Date(ms);
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}:${pad(d.getSeconds())}`;

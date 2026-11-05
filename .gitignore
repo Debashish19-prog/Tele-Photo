@@ -1,6 +1,5 @@
 node_modules/
 dist/
 .env
-# Holds your Telegram session, thumbnails and the photo index. Never commit.
-data/
+.vercel/
 *.log

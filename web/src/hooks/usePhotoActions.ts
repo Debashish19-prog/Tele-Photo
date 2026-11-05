@@ -69,10 +69,12 @@ export function usePhotoActions() {
           toast.add({ title: 'Too many at once', description: 'You can download up to 2,000 photos at a time.', type: 'error' });
           return;
         }
-        downloadPhotos(ids);
-        if (ids.length > 1) {
-          toast.add({ title: `Preparing ${formatCount(ids.length, 'photo')}`, description: 'They are fetched from Telegram as the zip downloads.' });
-        }
+        void downloadPhotos(ids).catch(fail);
+        toast.add(
+          ids.length > 1
+            ? { title: `Preparing ${formatCount(ids.length, 'photo')}`, description: 'They are fetched from Telegram as the zip is built. Keep this tab open.' }
+            : { title: 'Getting the original from Telegram' },
+        );
       },
     };
   }, [queryClient, toast]);

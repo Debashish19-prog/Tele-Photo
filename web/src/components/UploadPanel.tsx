@@ -3,7 +3,7 @@ import { useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, CloudUpload, Copy, RotateCw, TriangleAlert, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useMemo, useState } from 'react';
-import { api, type ServerUpload, type UploadStatus } from '@/api';
+import { api, type QueueItem, type UploadStatus } from '@/api';
 import { Progress, ProgressTrack } from '@/components/ui/progress';
 import { useLocalUploads } from '@/hooks/useUploadStatus';
 import { formatBytes } from '@/lib/format';
@@ -25,7 +25,7 @@ interface Row {
   onDismiss?: () => void;
 }
 
-function describeServer(item: ServerUpload): Pick<Row, 'tone' | 'label' | 'progress'> {
+function describeQueued(item: QueueItem): Pick<Row, 'tone' | 'label' | 'progress'> {
   if (item.status === 'failed') return { tone: 'error', label: item.error ?? 'Could not save to Telegram.', progress: null };
   if (item.status === 'uploading') {
     return { tone: 'active', label: `Saving to Telegram · ${Math.round((item.progress ?? 0) * 100)}%`, progress: item.progress ?? 0 };
@@ -42,15 +42,15 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
   const local = useLocalUploads();
   const [collapsed, setCollapsed] = useState(false);
 
-  const server = useMemo(() => new Map((status?.items ?? []).map((item) => [item.id, item])), [status]);
+  const queued = useMemo(() => new Map((status?.items ?? []).map((item) => [item.id, item])), [status]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
     const claimed = new Set<number>();
     const refresh = () => void queryClient.invalidateQueries({ queryKey: ['upload-status'] });
 
-    const retryServer = (id: number) => () => void api.retryUploads([id]).then(refresh);
-    const cancelServer = (id: number) => () => void api.cancelUpload(id).then(() => {
+    const retryQueued = (id: number) => () => void api.retryUploads([id]).then(refresh);
+    const cancelQueued = (id: number) => () => void api.cancelUpload(id).then(() => {
       refresh();
       void queryClient.invalidateQueries({ queryKey: ['photos'] });
     });
@@ -58,11 +58,11 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
     for (const entry of local as LocalUpload[]) {
       const base = { key: `l${entry.key}`, filename: entry.filename, size: entry.size, onDismiss: () => uploader.dismiss(entry.key) };
       if (entry.photoId !== null) claimed.add(entry.photoId);
-      const remote = entry.photoId !== null ? server.get(entry.photoId) : undefined;
+      const remote = entry.photoId !== null ? queued.get(entry.photoId) : undefined;
 
       if (entry.stage === 'waiting') out.push({ ...base, tone: 'active', label: 'Waiting', progress: null, onDismiss: undefined });
       else if (entry.stage === 'sending') {
-        out.push({ ...base, tone: 'active', label: `Sending to server · ${Math.round(entry.progress * 100)}%`, progress: entry.progress, onDismiss: undefined });
+        out.push({ ...base, tone: 'active', label: `Getting ready · ${Math.round(entry.progress * 100)}%`, progress: entry.progress, onDismiss: undefined });
       } else if (entry.stage === 'error') {
         out.push({ ...base, tone: 'error', label: entry.error ?? 'Failed.', progress: null, onRetry: entry.file ? () => uploader.retry(entry.key) : undefined });
       } else if (entry.stage === 'duplicate') {
@@ -72,31 +72,31 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
       } else if (remote) {
         out.push({
           ...base,
-          ...describeServer(remote),
-          onDismiss: remote.status === 'uploading' ? undefined : cancelServer(remote.id),
-          onRetry: remote.status === 'failed' ? retryServer(remote.id) : undefined,
+          ...describeQueued(remote),
+          onDismiss: remote.status === 'uploading' ? undefined : cancelQueued(remote.id),
+          onRetry: remote.status === 'failed' ? retryQueued(remote.id) : undefined,
         });
       } else {
         out.push({ ...base, tone: 'done', label: 'Saved to Telegram', progress: null });
       }
     }
 
-    // Work the server is still doing after a reload, or from another device.
+    // What is left of the queue after a reload, when this list has started empty.
     for (const item of status?.items ?? []) {
       if (claimed.has(item.id)) continue;
       out.push({
         key: `s${item.id}`,
         filename: item.filename,
         size: item.size,
-        ...describeServer(item),
-        onDismiss: item.status === 'uploading' ? undefined : cancelServer(item.id),
-        onRetry: item.status === 'failed' ? retryServer(item.id) : undefined,
+        ...describeQueued(item),
+        onDismiss: item.status === 'uploading' ? undefined : cancelQueued(item.id),
+        onRetry: item.status === 'failed' ? retryQueued(item.id) : undefined,
       });
     }
 
     const rank: Record<Tone, number> = { error: 0, active: 1, done: 2, info: 3 };
     return out.sort((a, b) => rank[a.tone] - rank[b.tone]);
-  }, [local, server, status, queryClient]);
+  }, [local, queued, status, queryClient]);
 
   const scanning = status?.scan.running ?? false;
   const visible = rows.length > 0 || scanning;
@@ -104,7 +104,6 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
   const active = rows.filter((r) => r.tone === 'active').length;
   const failed = rows.filter((r) => r.tone === 'error').length;
   const finished = rows.length - active - failed;
-  const sendingFromBrowser = local.some((e) => e.stage === 'sending' || e.stage === 'waiting');
 
   const title = scanning
     ? `Restoring from Telegram · ${(status?.scan.added ?? 0).toLocaleString()} found`
@@ -193,9 +192,9 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
                 <li className="px-4 py-2 text-center text-[12px] text-[var(--lq-text-dim)]">and {(rows.length - MAX_ROWS).toLocaleString()} more</li>
               ) : null}
             </ul>
-            {sendingFromBrowser ? (
+            {active > 0 ? (
               <p className="border-t border-[var(--app-line)] px-4 py-2 text-[11.5px] text-[var(--lq-text-dim)]">
-                Keep this tab open until each file has reached the server. After that, the server finishes the job on its own.
+                Keep this tab open until everything has reached Telegram. Your photos go straight there from this device.
               </p>
             ) : null}
           </motion.div>

@@ -8,15 +8,18 @@ import { AnimatePresence, type DragControls, motion, useDragControls, useIsPrese
 import { type ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { Link } from 'wouter';
-import { api, originalUrl, type PhotoDetail, type PhotoItem, previewUrl, thumbUrl } from '@/api';
+import { api, type PhotoDetail, type PhotoItem } from '@/api';
 import { Tip } from '@/components/IconAction';
 import { Toolbar, ToolbarButton, ToolbarGroup } from '@/components/ui/toolbar';
+import { preloadPreview, useMedia } from '@/hooks/useMedia';
 import { usePhotoActions } from '@/hooks/usePhotoActions';
 import { formatBytes, formatExposure, formatMegapixels, fullDate, timeOfDay } from '@/lib/format';
 import { type Box, CLOSE, CLOSE_MS, FLIGHT, fitBox, type Pose, poseFromTile, QUICK, REST, type Size, SPRING } from '@/lib/motion';
 
 /** Shown in the browser at full size only below this. Larger ones wait for the person to ask. */
 const AUTO_ORIGINAL_BYTES = 50 * 1024 * 1024;
+/** Downloading the next photo ahead of time is only worth it when that costs little. */
+const PRELOAD_MAX_BYTES = 8 * 1024 * 1024;
 const WEB_SAFE = new Set(['image/jpeg', 'image/png', 'image/webp', 'image/gif', 'image/avif']);
 const MAX_ZOOM = 8;
 const INFO_WIDTH = 360;
@@ -132,7 +135,10 @@ export function Lightbox({ photoId, items, mode, keysPaused, onNavigate, onClose
 
   useEffect(() => {
     for (const neighbor of [previous, next]) {
-      if (neighbor && !neighbor.noPreview && !neighbor.previewComing) new Image().src = previewUrl(neighbor.id);
+      if (!neighbor || neighbor.noPreview || neighbor.previewComing) continue;
+      void api.photo(neighbor.id).then((info) => {
+        if (info.size <= PRELOAD_MAX_BYTES) preloadPreview(neighbor.id);
+      }, () => undefined);
     }
   }, [previous, next]);
 
@@ -152,17 +158,16 @@ export function Lightbox({ photoId, items, mode, keysPaused, onNavigate, onClose
     if (photo && webSafe && view.scale > 1.2 && photo.size <= AUTO_ORIGINAL_BYTES) loadOriginal();
   }, [photo, webSafe, view.scale, loadOriginal]);
 
+  // Stays asked for once asked for, so it keeps showing after it has finished loading.
+  const wantOriginal = originalState === 'loading' || originalState === 'ready';
+  const original = useMedia(photoId, 'original', { enabled: wantOriginal });
   useEffect(() => {
-    if (originalState !== 'loading') return;
-    let cancelled = false;
-    const image = new Image();
-    image.onload = () => !cancelled && setOriginalState('ready');
-    image.onerror = () => !cancelled && setOriginalState('failed');
-    image.src = originalUrl(photoId);
-    return () => {
-      cancelled = true;
-    };
-  }, [originalState, photoId]);
+    if (originalState !== 'loading' || original.state === 'loading') return;
+    setOriginalState(original.url ? 'ready' : 'failed');
+  }, [originalState, original.state, original.url]);
+
+  // Null when this device has no preview and making one would mean a very large download.
+  const preview = useMedia(photoId, 'preview', { enabled: previewState === 'ready' && originalState !== 'ready' });
 
   const afterRemoval = useCallback(() => {
     if (next) onNavigate(next.id);
@@ -215,7 +220,9 @@ export function Lightbox({ photoId, items, mode, keysPaused, onNavigate, onClose
   const closing = !isPresent;
   const zoomed = view.scale > 1;
   const canSwipe = !zoomed && !closing;
-  const src = originalState === 'ready' ? originalUrl(photoId) : previewUrl(photoId);
+  const src = originalState === 'ready' ? original.url : preview.url;
+  const fetchingPreview = preview.state === 'loading' && previewState === 'ready' && originalState === 'none';
+  const previewTooLarge = preview.state === 'empty' && previewState === 'ready' && originalState === 'none';
   const chrome = { initial: { opacity: 0 }, animate: { opacity: closing ? 0 : 1 }, transition: QUICK };
   const stageKey = stageSize ? `${stageSize.width}/${stageSize.height}` : '';
 
@@ -339,8 +346,10 @@ export function Lightbox({ photoId, items, mode, keysPaused, onNavigate, onClose
           {next ? <NavArrow side="right" label="Next photo" layoutKey={stageKey} onClick={() => onNavigate(next.id)} /> : null}
 
           {originalState === 'loading' ? <Chip>Loading the original from Telegram…</Chip> : null}
+          {fetchingPreview ? <SlowChip>Loading from Telegram…</SlowChip> : null}
+          {preview.state === 'failed' && originalState === 'none' ? <Chip>Couldn't reach Telegram. Showing what this device has.</Chip> : null}
           {originalState === 'failed' ? <Chip>Couldn't load the original. Showing the preview.</Chip> : null}
-          {originalState === 'none' && photo && webSafe && view.scale > 1.2 && photo.size > AUTO_ORIGINAL_BYTES ? (
+          {originalState === 'none' && photo && webSafe && (previewTooLarge || (view.scale > 1.2 && photo.size > AUTO_ORIGINAL_BYTES)) ? (
             <Chip>
               <button type="button" className="pointer-events-auto cursor-pointer font-semibold underline" onClick={loadOriginal}>
                 Load the {formatBytes(photo.size)} original
@@ -364,16 +373,17 @@ interface HeroProps {
   reducedMotion: boolean;
   direction: number;
   closingTo: Pose | null;
-  src: string;
+  src: string | null;
   alt: string;
   dragControls: DragControls;
   canSwipe: boolean;
   onSwipe: (distance: number, speed: number) => void;
 }
 
-/** The photo itself. The thumbnail is already cached, so it shows at once while the preview loads. */
+/** The photo itself. The thumbnail is usually already here, so it shows at once while the preview loads. */
 function Hero({ photoId, box, stage, flyFromTile, reducedMotion, direction, closingTo, src, alt, dragControls, canSwipe, onSwipe }: HeroProps) {
   const isPresent = useIsPresent();
+  const thumb = useMedia(photoId, 'thumb');
   const [loaded, setLoaded] = useState(false);
   const [thumbDone, setThumbDone] = useState(false);
   const [start] = useState<Pose>(() => {
@@ -404,18 +414,20 @@ function Hero({ photoId, box, stage, flyFromTile, reducedMotion, direction, clos
       dragElastic={0.5}
       onDragEnd={(_, info) => onSwipe(info.offset.x, info.velocity.x)}
     >
-      <img src={thumbUrl(photoId)} alt="" draggable={false} className={`absolute inset-0 size-full object-cover ${thumbDone ? 'invisible' : ''}`} />
-      <motion.img
-        src={src}
-        alt={alt}
-        draggable={false}
-        className="absolute inset-0 size-full object-contain"
-        initial={{ opacity: 0 }}
-        animate={{ opacity: loaded ? 1 : 0 }}
-        transition={QUICK}
-        onLoad={() => setLoaded(true)}
-        onAnimationComplete={() => loaded && setThumbDone(true)}
-      />
+      {thumb.url ? <img src={thumb.url} alt="" draggable={false} className={`absolute inset-0 size-full object-cover ${thumbDone ? 'invisible' : ''}`} /> : null}
+      {src ? (
+        <motion.img
+          src={src}
+          alt={alt}
+          draggable={false}
+          className="absolute inset-0 size-full object-contain"
+          initial={{ opacity: 0 }}
+          animate={{ opacity: loaded ? 1 : 0 }}
+          transition={QUICK}
+          onLoad={() => setLoaded(true)}
+          onAnimationComplete={() => loaded && setThumbDone(true)}
+        />
+      ) : null}
     </motion.div>
   );
 }
@@ -461,6 +473,16 @@ function Chip({ children }: { children: ReactNode }) {
   );
 }
 
+/** Waits a moment first, so a photo that comes straight from this device's cache shows no flash of text. */
+function SlowChip({ children }: { children: ReactNode }) {
+  const [show, setShow] = useState(false);
+  useEffect(() => {
+    const timer = setTimeout(() => setShow(true), 350);
+    return () => clearTimeout(timer);
+  }, []);
+  return show ? <Chip>{children}</Chip> : null;
+}
+
 function NoPreview({ photo, onDownload }: { photo: PhotoDetail; onDownload: () => void }) {
   return (
     <div className="absolute inset-0 grid place-items-center p-6 text-center">
@@ -469,7 +491,7 @@ function NoPreview({ photo, onDownload }: { photo: PhotoDetail; onDownload: () =
         <p className="text-base font-semibold">{photo.filename}</p>
         <p className="text-[13.5px] text-white/65">
           {photo.previewState === 'missing'
-            ? 'The preview is being rebuilt from Telegram.'
+            ? 'A preview is being made from the copy in Telegram.'
             : "This browser can't show this format, but the original is stored safely and unchanged."}
         </p>
         <button type="button" onClick={onDownload} className="mt-1 cursor-pointer rounded-full bg-white px-4 py-2 text-[13.5px] font-semibold text-black">
@@ -501,9 +523,9 @@ function storageFact(photo: PhotoDetail) {
     return <Fact icon={<CloudCheck className="size-5" aria-hidden="true" />} title="In your Telegram" lines={['Original quality, unchanged', photo.telegramMessageId ? `Message #${photo.telegramMessageId} in Tele-Photo Library` : null]} />;
   }
   if (photo.status === 'failed') {
-    return <Fact icon={<TriangleAlert className="size-5 text-[#ff8a8f]" aria-hidden="true" />} title="Not in Telegram yet" lines={[photo.error, 'Your file is safe on this server. Retry from the uploads panel.']} />;
+    return <Fact icon={<TriangleAlert className="size-5 text-[#ff8a8f]" aria-hidden="true" />} title="Not in Telegram yet" lines={[photo.error, 'Your original is still on your device. Retry from the uploads panel, or add the file again.']} />;
   }
-  return <Fact icon={<CloudUpload className="size-5" aria-hidden="true" />} title="Being saved to Telegram" lines={['A full copy stays on this server until Telegram confirms it.']} />;
+  return <Fact icon={<CloudUpload className="size-5" aria-hidden="true" />} title="Being saved to Telegram" lines={['Keep this tab open until Telegram confirms it.']} />;
 }
 
 function InfoPanel({ photo, sideways, onClose }: { photo: PhotoDetail | undefined; sideways: boolean; onClose: () => void }) {

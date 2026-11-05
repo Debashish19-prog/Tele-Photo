@@ -1,6 +1,6 @@
 import { LiquiGlass } from '@liqui-design/glass';
 import { useQueryClient } from '@tanstack/react-query';
-import { LogOut, Moon, RefreshCw, Search, Sun, SunMoon, Unplug, Upload, X } from 'lucide-react';
+import { LogOut, Moon, RefreshCw, Search, ShieldCheck, Sun, SunMoon, Upload, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
 import { useEffect, useRef, useState } from 'react';
 import { Link, Route, Switch, useLocation, useSearch } from 'wouter';
@@ -9,6 +9,7 @@ import { ConfirmDialog, type ConfirmRequest } from '@/components/ConfirmDialog';
 import { CrystalButton } from '@/components/CrystalButton';
 import { DemoBadge } from '@/components/DemoBadge';
 import { LogoMark } from '@/components/Logo';
+import { StorageCheckDialog } from '@/components/StorageCheckDialog';
 import { UploadPanel } from '@/components/UploadPanel';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
@@ -105,6 +106,7 @@ function UserMenu({ account, onSignedOut }: { account: Account; onSignedOut: () 
   const toast = useToast();
   const queryClient = useQueryClient();
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [checking, setChecking] = useState(false);
   const name = [account.firstName, account.lastName].filter(Boolean).join(' ') || account.username || account.phone;
   const initial = (name.trim()[0] ?? '?').toUpperCase();
 
@@ -144,7 +146,7 @@ function UserMenu({ account, onSignedOut }: { account: Account; onSignedOut: () 
             onClick={() =>
               void api.rescan().then(
                 () => {
-                  toast.add({ title: 'Checking your Telegram library', description: 'Anything missing from this server will be restored.' });
+                  toast.add({ title: 'Checking your Telegram library', description: 'Anything missing from this browser will be restored.' });
                   void queryClient.invalidateQueries({ queryKey: ['upload-status'] });
                 },
                 (err: Error) => toast.add({ title: 'That did not work', description: err.message, type: 'error' }),
@@ -153,25 +155,26 @@ function UserMenu({ account, onSignedOut }: { account: Account; onSignedOut: () 
           >
             <RefreshCw className="size-4" aria-hidden="true" /> Restore from Telegram
           </MenuItem>
-          <MenuItem onClick={() => void api.logout().then(onSignedOut)}>
-            <LogOut className="size-4" aria-hidden="true" /> Sign out of this browser
+          <MenuItem onClick={() => setChecking(true)}>
+            <ShieldCheck className="size-4" aria-hidden="true" /> Check Telegram storage
           </MenuItem>
           <MenuItem
             variant="danger"
             onClick={() =>
               setConfirm({
-                title: 'Disconnect Telegram?',
-                description: 'This server loses access to your Telegram account, and every browser is signed out. Your photos stay in your Telegram, and you can sign back in at any time.',
-                confirm: 'Disconnect',
-                onConfirm: () => api.disconnect().then(onSignedOut),
+                title: 'Sign out of this browser?',
+                description: 'This ends its Telegram session and clears its thumbnails and index. Your photos, albums and favorites stay in your Telegram, and come back when you sign in again. Anything still uploading will stop.',
+                confirm: 'Sign out',
+                onConfirm: () => api.signOut().then(onSignedOut),
               })
             }
           >
-            <Unplug className="size-4" aria-hidden="true" /> Disconnect Telegram
+            <LogOut className="size-4" aria-hidden="true" /> Sign out
           </MenuItem>
         </MenuContent>
       </Menu>
       <ConfirmDialog request={confirm} onClose={() => setConfirm(null)} />
+      <StorageCheckDialog open={checking} onClose={() => setChecking(false)} />
     </>
   );
 }

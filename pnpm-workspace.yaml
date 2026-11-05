@@ -1,12 +1,11 @@
 packages:
-  - server
   - web
 
 # Only these packages may run install scripts. Everything else stays blocked.
+# The two set to false are optional speed-ups for a Node WebSocket, which a browser does not use.
+# Each has to be listed either way, as newer pnpm versions fail the install on an undecided one.
 allowBuilds:
-  better-sqlite3: true
   esbuild: true
-  sharp: true
   bufferutil: false
   utf-8-validate: false
   es5-ext: false
