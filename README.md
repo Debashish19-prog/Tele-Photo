@@ -101,9 +101,9 @@ Sign in on each one. Photos and changes from other devices appear when you open 
 
 ### If something goes wrong mid-upload
 
-The original stays on your device throughout, so nothing can be lost. Rate limits from Telegram pause the queue rather than failing it, and repeated failures stay in the uploads panel with a **Retry** button.
+The original stays on your device throughout, so nothing can be lost. Rate limits from Telegram pause the queue rather than failing it, and repeated failures stay in the uploads panel with a **Retry** button. Use **Retry all failed uploads** to restart a failed batch together.
 
-**Uploads only run while the tab is open**, as there is no server to finish them. The page warns you before you leave, and asks a phone not to sleep while uploading. If a tab closes anyway, add the same files again: finished ones are recognised, and the rest pick up from there.
+**Uploads only run while the tab is open**, as there is no server to finish them. The page warns you before you leave, and asks a phone not to sleep while uploading. If a tab closes anyway, **Retry** asks you to select the originals again. You can select the whole batch: finished ones are skipped, and the rest pick up from there, keeping their albums.
 
 ## Good to know
 

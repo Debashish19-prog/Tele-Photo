@@ -100,6 +100,8 @@ export interface QueueItem {
   progress: number | null;
   error: string | null;
   nextAttemptAt: number | null;
+  /** A reloaded tab needs the person to select the original again before retrying. */
+  needsFile: boolean;
 }
 
 export interface UploadStatus {
@@ -121,6 +123,8 @@ export interface IngestResult {
 export interface IngestOptions {
   /** Uploads into this album only, keeping the photo out of Photos. */
   albumId?: number;
+  /** Reattaches selected originals without importing new photos or changing their albums. */
+  retryOnly?: boolean;
 }
 
 export interface EngineOptions {
@@ -551,19 +555,22 @@ export class Engine {
     const sha256 = await hashBlob(file, onProgress);
     const known = store.getPhotoBySha(sha256);
     if (known) {
-      // Interrupted earlier, and the person has now given us the file back.
-      if (known.status !== 'stored' && !queue.hasFile(known.id)) {
+      // A failed upload is still an upload, even if this tab already holds its file.
+      if (known.status !== 'stored' && (!queue.hasFile(known.id) || known.status === 'failed')) {
         const shown = await mediaLimiter(() => media.makePreviews(file, type.mime));
         queue.attach(known.id, file, shown?.telegramThumb ?? null);
-        await store.rescheduleUpload(known.id, 0, null, false);
+        if (known.status === 'failed') await store.retryFailed([known.id], queue.hasFile);
+        else await store.rescheduleUpload(known.id, 0, null, false);
         // Finishing an interrupted upload, so it stays wherever it was first sent, even if added again from elsewhere.
-        const album = targetAlbum();
+        const album = options.retryOnly ? null : targetAlbum();
         if (album !== null) await store.addToAlbum(album, [known.id]);
         queue.notify();
         return { id: known.id, duplicate: false, restored: false };
       }
+      if (options.retryOnly) return { id: known.id, duplicate: known.status === 'stored', restored: false };
       return this.placeKnown(known, targetAlbum());
     }
+    if (options.retryOnly) throw new UserFacingError('NOT_AN_UPLOAD', 'This file does not match an existing upload. Select the original photo again.');
 
     const fileDate = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$/.test(lastModified ?? '') ? lastModified : null;
     const [meta, shown] = await Promise.all([media.readMetadata(file), mediaLimiter(() => media.makePreviews(file, type.mime))]);
@@ -636,6 +643,7 @@ export class Engine {
       progress: this.queue.progress.get(p.id) ?? (p.status === 'uploading' ? 0 : null),
       error: p.last_error,
       nextAttemptAt: p.next_attempt_at > Date.now() ? p.next_attempt_at : null,
+      needsFile: !this.queue.hasFile(p.id),
     }));
     return { items, stats: this.store.libraryStats(), scan: this.library.scanState(), revision: this.revision };
   }
@@ -644,7 +652,7 @@ export class Engine {
     this.requireAccount();
     const retried = await this.store.retryFailed(ids ?? null, this.queue.hasFile);
     this.queue.notify();
-    const stuck = this.store.getPhotos(ids ?? []).some((p) => p.status === 'failed' && !this.queue.hasFile(p.id));
+    const stuck = (ids ? this.store.getPhotos(ids) : this.store.allPhotos()).some((p) => p.status === 'failed' && !this.queue.hasFile(p.id));
     if (stuck) throw new UserFacingError('FILE_NEEDED', INTERRUPTED_MESSAGE);
     return { retried };
   }

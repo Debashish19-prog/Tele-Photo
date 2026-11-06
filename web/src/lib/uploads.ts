@@ -21,6 +21,7 @@ export interface LocalUpload {
   photoId: number | null;
   /** The album this was uploaded into, which keeps it out of Photos. */
   albumId: number | null;
+  retryOnly?: boolean;
 }
 
 type Listener = () => void;
@@ -57,7 +58,7 @@ class Uploader {
     return this.entries.some((e) => e.stage === 'waiting' || e.stage === 'sending');
   }
 
-  add(files: File[], albumId: number | null = null): { added: number; skipped: number } {
+  add(files: File[], albumId: number | null = null, options: { retryOnly?: boolean } = {}): { added: number; skipped: number } {
     let added = 0;
     let skipped = 0;
     for (const file of files) {
@@ -77,6 +78,7 @@ class Uploader {
         error: tooBig ? 'Larger than the 1.95 GB Telegram accepts in one file.' : null,
         photoId: null,
         albumId,
+        retryOnly: options.retryOnly,
       });
       added++;
     }
@@ -87,7 +89,7 @@ class Uploader {
 
   retry(key: number): void {
     const entry = this.entries.find((e) => e.key === key);
-    if (!entry?.file) return;
+    if (!entry?.file || entry.stage !== 'error') return;
     this.patch(key, { stage: 'waiting', progress: 0, error: null });
     this.pump();
   }
@@ -125,7 +127,7 @@ class Uploader {
         entry.filename,
         toWallClock(file.lastModified),
         (fraction) => this.patch(entry.key, { progress: fraction }),
-        entry.albumId !== null ? { albumId: entry.albumId } : {},
+        { ...(entry.albumId !== null ? { albumId: entry.albumId } : {}), retryOnly: entry.retryOnly },
       );
       this.patch(entry.key, {
         stage: result.restored ? 'restored' : result.duplicate ? 'duplicate' : 'received',

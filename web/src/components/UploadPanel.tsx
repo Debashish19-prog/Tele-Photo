@@ -2,9 +2,10 @@ import { LiquiGlass } from '@liqui-design/glass';
 import { useQueryClient } from '@tanstack/react-query';
 import { Check, ChevronDown, CloudUpload, Copy, RotateCw, TriangleAlert, X } from 'lucide-react';
 import { AnimatePresence, motion } from 'motion/react';
-import { useMemo, useState } from 'react';
-import { api, type QueueItem, type UploadStatus } from '@/api';
+import { useCallback, useMemo, useRef, useState } from 'react';
+import { ApiError, api, type QueueItem, type UploadStatus } from '@/api';
 import { Progress, ProgressTrack } from '@/components/ui/progress';
+import { useToast } from '@/components/ui/toast';
 import { useLocalUploads } from '@/hooks/useUploadStatus';
 import { formatBytes } from '@/lib/format';
 import { QUICK } from '@/lib/motion';
@@ -22,6 +23,7 @@ interface Row {
   label: string;
   progress: number | null;
   onRetry?: () => void;
+  needsFile?: boolean;
   onDismiss?: () => void;
 }
 
@@ -39,20 +41,45 @@ function describeQueued(item: QueueItem): Pick<Row, 'tone' | 'label' | 'progress
 
 export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
   const queryClient = useQueryClient();
+  const toast = useToast();
   const local = useLocalUploads();
   const [collapsed, setCollapsed] = useState(false);
+  const fileInput = useRef<HTMLInputElement>(null);
+
+  const refresh = useCallback(() => {
+    for (const key of ['upload-status', 'photos', 'photo', 'albums']) {
+      void queryClient.invalidateQueries({ queryKey: [key] });
+    }
+  }, [queryClient]);
+
+  const fail = useCallback((err: unknown) => {
+    toast.add({
+      title: 'Could not update the upload',
+      description: err instanceof Error ? err.message : 'Please try again.',
+      type: 'error',
+      ...(err instanceof ApiError && err.code === 'FILE_NEEDED'
+        ? { actionProps: { children: 'Choose photos', onClick: () => fileInput.current?.click() } }
+        : {}),
+    });
+    refresh();
+  }, [refresh, toast]);
+
+  const retryQueued = useCallback((items: QueueItem[]) => {
+    const ready = items.filter((item) => !item.needsFile);
+    if (ready.length > 0) void api.retryUploads(ready.map((item) => item.id)).then(refresh, fail);
+    // Open from the click itself so browsers allow the file picker, including on phones.
+    if (items.some((item) => item.needsFile)) fileInput.current?.click();
+  }, [refresh, fail]);
 
   const queued = useMemo(() => new Map((status?.items ?? []).map((item) => [item.id, item])), [status]);
 
   const rows = useMemo(() => {
     const out: Row[] = [];
     const claimed = new Set<number>();
-    const refresh = () => void queryClient.invalidateQueries({ queryKey: ['upload-status'] });
-
-    const retryQueued = (id: number) => () => void api.retryUploads([id]).then(refresh);
-    const cancelQueued = (id: number) => () => void api.cancelUpload(id).then(() => {
-      refresh();
-      void queryClient.invalidateQueries({ queryKey: ['photos'] });
+    const cancelQueued = (id: number) => () => void api.cancelUpload(id).then(refresh, fail);
+    const queuedRetry = (item: QueueItem) => ({
+      onRetry: item.status === 'failed' ? () => retryQueued([item]) : undefined,
+      needsFile: item.status === 'failed' && item.needsFile,
     });
 
     for (const entry of local as LocalUpload[]) {
@@ -73,8 +100,8 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
         out.push({
           ...base,
           ...describeQueued(remote),
+          ...queuedRetry(remote),
           onDismiss: remote.status === 'uploading' ? undefined : cancelQueued(remote.id),
-          onRetry: remote.status === 'failed' ? retryQueued(remote.id) : undefined,
         });
       } else {
         out.push({ ...base, tone: 'done', label: 'Saved to Telegram', progress: null });
@@ -89,14 +116,23 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
         filename: item.filename,
         size: item.size,
         ...describeQueued(item),
+        ...queuedRetry(item),
         onDismiss: item.status === 'uploading' ? undefined : cancelQueued(item.id),
-        onRetry: item.status === 'failed' ? retryQueued(item.id) : undefined,
       });
     }
 
     const rank: Record<Tone, number> = { error: 0, active: 1, done: 2, info: 3 };
     return out.sort((a, b) => rank[a.tone] - rank[b.tone]);
-  }, [local, queued, status, queryClient]);
+  }, [local, queued, status, refresh, fail, retryQueued]);
+
+  const retryable = rows.filter((row) => row.onRetry).length;
+  const needsFiles = rows.some((row) => row.needsFile);
+  const retryAll = () => {
+    for (const entry of local) {
+      if (entry.stage === 'error' && entry.file) uploader.retry(entry.key);
+    }
+    retryQueued((status?.items ?? []).filter((item) => item.status === 'failed'));
+  };
 
   const scanning = status?.scan.running ?? false;
   const visible = rows.length > 0 || scanning;
@@ -129,6 +165,18 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
         refraction was barely visible anyway.
       */}
       <LiquiGlass material="frost" radius={22} elevated frost={1} blur={6} className="lq-solid" contentClassName="flex flex-col">
+        <input
+          ref={fileInput}
+          type="file"
+          multiple
+          hidden
+          aria-label="Choose original photos to retry"
+          accept="image/*,.heic,.heif,.dng,.cr2,.cr3,.nef,.arw,.orf,.rw2,.raf,.pef,.srw"
+          onChange={(event) => {
+            uploader.add([...(event.target.files ?? [])], null, { retryOnly: true });
+            event.target.value = '';
+          }}
+        />
         <div className="flex items-center gap-2 px-4 py-3" aria-live="polite">
           {failed > 0 && active === 0 ? (
             <TriangleAlert className="size-[18px] flex-none text-[var(--lq-danger)]" aria-hidden="true" />
@@ -177,7 +225,7 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
                     ) : null}
                   </div>
                   {row.onRetry ? (
-                    <button type="button" aria-label={`Retry ${row.filename}`} className="grid size-7 flex-none cursor-pointer place-items-center rounded-full hover:bg-[var(--lq-highlight)]" onClick={row.onRetry}>
+                    <button type="button" aria-label={`Retry ${row.filename}`} title={row.needsFile ? 'Choose the original photo to retry' : 'Retry upload'} className="grid size-7 flex-none cursor-pointer place-items-center rounded-full hover:bg-[var(--lq-highlight)]" onClick={row.onRetry}>
                       <RotateCw className="size-3.5" aria-hidden="true" />
                     </button>
                   ) : null}
@@ -192,6 +240,14 @@ export function UploadPanel({ status }: { status: UploadStatus | undefined }) {
                 <li className="px-4 py-2 text-center text-[12px] text-[var(--lq-text-dim)]">and {(rows.length - MAX_ROWS).toLocaleString()} more</li>
               ) : null}
             </ul>
+            {retryable > 1 || needsFiles ? (
+              <div className="border-t border-[var(--app-line)] px-4 py-2 text-[11.5px] text-[var(--lq-text-dim)]">
+                {needsFiles ? <p>Select the original photos again to retry. You can select the whole batch; saved photos will be skipped.</p> : null}
+                {retryable > 1 ? (
+                  <button type="button" className="mt-1 cursor-pointer font-semibold text-[var(--lq-accent)]" onClick={retryAll}>Retry all failed uploads</button>
+                ) : null}
+              </div>
+            ) : null}
             {active > 0 ? (
               <p className="border-t border-[var(--app-line)] px-4 py-2 text-[11.5px] text-[var(--lq-text-dim)]">
                 Keep this tab open until everything has reached Telegram. Your photos go straight there from this device.

@@ -332,6 +332,41 @@ describe('the engine', () => {
       expect(e().photo(id).status).toBe('stored');
     });
 
+    it('retries a failed batch of 50 without re-uploading photos already stored', async () => {
+      const safe = await d.stored(makeJpeg(), 'already-saved.jpg');
+      const putPhoto = d.storage.putPhoto.bind(d.storage);
+      d.storage.putPhoto = async () => { throw new Error('offline'); };
+      const ids: number[] = [];
+      for (let i = 0; i < 50; i++) {
+        ids.push(await d.addOk(makeJpeg({ color: `batch-${i}` }), `${i}.jpg`));
+      }
+      for (let i = 0; i < 6; i++) {
+        clearBackoff();
+        await e().queue.drain();
+      }
+      expect(e().uploadStatus().stats.failed).toBe(50);
+      expect(e().uploadStatus().items.every((item) => !item.needsFile)).toBe(true);
+
+      d.storage.putPhoto = putPhoto;
+      expect(await e().retryUploads(ids)).toEqual({ retried: 50 });
+      await e().queue.drain();
+      expect(ids.every((id) => e().photo(id).status === 'stored')).toBe(true);
+      expect(e().photo(safe).status).toBe('stored');
+      expect(await d.storage.storedCount(SESSION)).toBe(51);
+    });
+
+    it('resumes a failed photo when selected again instead of treating it as a duplicate', async () => {
+      const original = makeJpeg();
+      d.storage.failNextPut = new Error('offline');
+      const id = await d.addOk(original);
+      await e().queue.drain();
+      await e().store.markFailed(id, 'offline');
+
+      expect(await d.add(original)).toEqual({ id, duplicate: false, restored: false });
+      await e().queue.drain();
+      expect(e().photo(id).status).toBe('stored');
+    });
+
     it('waits out a rate limit without using up a retry', async () => {
       d.storage.failNextPut = new RateLimitedError(300);
       const id = await d.addOk(makeJpeg());
@@ -783,7 +818,59 @@ describe('the engine', () => {
       await e().queue.drain();
       await d.reload();
       await expect(e().retryUploads([id])).rejects.toMatchObject({ code: 'FILE_NEEDED' });
+      await expect(e().retryUploads()).rejects.toMatchObject({ code: 'FILE_NEEDED' });
+      expect(e().uploadStatus().items[0]).toMatchObject({ id, needsFile: true });
       expect(e().photo(id).status).toBe('failed');
+    });
+
+    it('gives a reselected file a fresh retry budget after a reload', async () => {
+      const original = makeJpeg();
+      d.storage.failNextPut = new Error('offline');
+      const id = await d.addOk(original);
+      await e().queue.drain();
+      for (let i = 0; i < 5; i++) await e().store.markFailed(id, 'offline');
+      expect(e().store.getPhoto(id)!.attempts).toBe(6);
+      await d.reload();
+
+      d.storage.failNextPut = new Error('one more network error');
+      expect(await e().ingest(new Blob([original as BlobPart]), 'photo.jpg', null, undefined, { retryOnly: true }))
+        .toEqual({ id, duplicate: false, restored: false });
+      await e().queue.drain();
+      expect(e().store.getPhoto(id)).toMatchObject({ status: 'queued', attempts: 1 });
+      expect(e().uploadStatus().items[0]).toMatchObject({ id, needsFile: false });
+
+      e().store.getPhoto(id)!.next_attempt_at = 0;
+      await e().queue.drain();
+      expect(e().photo(id).status).toBe('stored');
+    });
+
+    it('lets the whole original batch be reselected without changing albums or restoring Trash', async () => {
+      const album = await e().createAlbum('Trip');
+      const originals = Array.from({ length: 3 }, (_, i) => makeJpeg({ color: `retry-${i}` }));
+      const safe = (await d.addInto(album.id, originals[0]!)).id;
+      await e().queue.drain();
+      const trashed = await d.stored(originals[1]!);
+      await e().setTrashed([trashed], true);
+      d.storage.failNextPut = new Error('offline');
+      const pending = (await d.addInto(album.id, originals[2]!)).id;
+      await e().queue.drain();
+      await d.reload();
+
+      for (const original of originals) {
+        await e().ingest(new Blob([original as BlobPart]), 'photo.jpg', null, undefined, { retryOnly: true });
+      }
+      await e().queue.drain();
+      expect(e().photo(safe).albumOnly).toBe(true);
+      expect(e().photo(trashed).trashedAt).not.toBeNull();
+      expect(e().photo(pending)).toMatchObject({ status: 'stored', albumOnly: true });
+      expect(e().album(album.id).photoCount).toBe(2);
+      expect(await d.storage.storedCount(SESSION)).toBe(3);
+    });
+
+    it('asks for the original if a different photo is selected for a retry', async () => {
+      await expect(e().ingest(new Blob([makeJpeg() as BlobPart]), 'wrong.jpg', null, undefined, { retryOnly: true }))
+        .rejects.toMatchObject({ code: 'NOT_AN_UPLOAD' });
+      expect(d.names()).toEqual([]);
     });
 
     it('picks up where it left off when the same file is added again', async () => {
